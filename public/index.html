@@ -718,7 +718,7 @@
       type: 'all',
       q: '',
       selectedFiles: [],
-      config: { maxFileMb: 100, pinRequired: false },
+      config: { maxFileMb: 100, jsonUploadMaxMb: 15, pinRequired: false },
       pin: localStorage.getItem('libraryPin') || '',
       appContext: null
     };
@@ -777,6 +777,15 @@
       if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
       if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
       return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
+    }
+
+    function readFileAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error || new Error(`Could not read ${file.name}`));
+        reader.readAsDataURL(file);
+      });
     }
 
     function isJSONValid(value) {
@@ -904,7 +913,7 @@
     async function loadConfig() {
       const data = await fetch('/api/config').then((res) => res.json());
       state.config = data;
-      $('#uploadHelp').textContent = `الحد الأقصى للملف ${data.maxFileMb} MB. الامتدادات: ${data.allowedExtensions.join(', ')}`;
+      $('#uploadHelp').textContent = `الحد الأقصى للملف ${data.maxFileMb} MB. fallback للملفات الصغيرة حتى ${data.jsonUploadMaxMb} MB. الامتدادات: ${data.allowedExtensions.join(', ')}`;
       if (data.pinRequired && !state.pin) $('#pinDialog').showModal();
     }
 
@@ -953,7 +962,7 @@
       const totalBytes = state.selectedFiles.reduce((sum, file) => sum + file.size, 0);
       log(`Uploading ${state.selectedFiles.length} file(s), ${formatBytes(totalBytes)}...`);
       try {
-        const data = await api('/api/assets', { method: 'POST', body: form });
+        const data = await uploadWithFallback(form, totalBytes);
         log(`Uploaded ${data.created.length} file(s)`);
         toast('تم الرفع بنجاح');
         state.selectedFiles = [];
@@ -965,6 +974,40 @@
         toast(message);
       } finally {
         $('#uploadBtn').disabled = false;
+      }
+    }
+
+    async function uploadWithFallback(form, totalBytes) {
+      try {
+        return await api('/api/assets', { method: 'POST', body: form });
+      } catch (error) {
+        const maxFallbackBytes = Number(state.config.jsonUploadMaxMb || 15) * 1024 * 1024;
+        const canFallback = totalBytes <= maxFallbackBytes;
+        const message = error?.message || '';
+        log(`Multipart upload failed: ${message || 'unknown error'}`);
+
+        if (!canFallback) throw error;
+
+        log(`Retrying with fallback upload for files under ${state.config.jsonUploadMaxMb} MB...`);
+        const files = [];
+        for (const file of state.selectedFiles) {
+          files.push({
+            name: file.name,
+            mimeType: file.type || 'application/octet-stream',
+            size: file.size,
+            data: await readFileAsDataUrl(file)
+          });
+        }
+
+        return api('/api/assets/base64', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            files,
+            tags: $('#tagsInput').value,
+            notes: $('#notesInput').value
+          })
+        });
       }
     }
 

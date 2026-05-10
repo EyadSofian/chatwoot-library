@@ -15,6 +15,7 @@ const PORT = Number(process.env.PORT || 3000);
 const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || path.join(appRoot, 'storage', 'uploads'));
 const LIBRARY_FILE = path.resolve(process.env.LIBRARY_FILE || path.join(appRoot, 'storage', 'library.json'));
 const MAX_FILE_MB = Number(process.env.MAX_FILE_MB || 100);
+const JSON_UPLOAD_MAX_MB = Number(process.env.JSON_UPLOAD_MAX_MB || 15);
 const LIBRARY_PIN = process.env.LIBRARY_PIN || '';
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
 const CHATWOOT_URL = (process.env.CHATWOOT_URL || '').replace(/\/$/, '');
@@ -152,6 +153,38 @@ function parseTags(value) {
     .slice(0, 20);
 }
 
+function makeStoredFilename(originalName) {
+  const safeOriginal = cleanName(originalName);
+  const ext = path.extname(safeOriginal);
+  const base = path.basename(safeOriginal, ext);
+  const suffix = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  return `${base}-${suffix}${ext}`;
+}
+
+function createAssetItem(file, extra = {}) {
+  const now = extra.now || new Date().toISOString();
+  return {
+    id: crypto.randomUUID(),
+    originalName: file.originalName,
+    fileName: file.fileName,
+    title: String(extra.title || '').trim() || file.originalName,
+    type: assetType(file.fileName),
+    mimeType: file.mimeType,
+    size: file.size,
+    tags: extra.tags || [],
+    notes: extra.notes || '',
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function parseBase64Payload(value) {
+  const input = String(value || '');
+  const commaIndex = input.indexOf(',');
+  const base64 = commaIndex >= 0 ? input.slice(commaIndex + 1) : input;
+  return Buffer.from(base64, 'base64');
+}
+
 function requirePin(req, res, next) {
   if (!LIBRARY_PIN) return next();
   const provided = req.headers['x-library-pin'] || req.query.pin;
@@ -169,11 +202,7 @@ const storage = multer.diskStorage({
     }
   },
   filename: (_req, file, cb) => {
-    const safeOriginal = cleanName(file.originalname);
-    const ext = path.extname(safeOriginal);
-    const base = path.basename(safeOriginal, ext);
-    const suffix = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-    cb(null, `${base}-${suffix}${ext}`);
+    cb(null, makeStoredFilename(file.originalname));
   }
 });
 
@@ -213,6 +242,7 @@ function uploadAssetFiles(req, res, next) {
   });
 }
 
+app.use('/api/assets/base64', express.json({ limit: `${JSON_UPLOAD_MAX_MB + 2}mb` }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(appRoot, 'public')));
 app.use('/media', express.static(UPLOAD_DIR, {
@@ -230,6 +260,7 @@ app.get('/api/health', (_req, res) => {
 app.get('/api/config', (_req, res) => {
   res.json({
     maxFileMb: MAX_FILE_MB,
+    jsonUploadMaxMb: JSON_UPLOAD_MAX_MB,
     pinRequired: Boolean(LIBRARY_PIN),
     allowedExtensions: Array.from(allowedExtensions).sort()
   });
@@ -283,25 +314,73 @@ app.post('/api/assets', requirePin, uploadAssetFiles, async (req, res) => {
   const tags = parseTags(req.body.tags);
   const notes = String(req.body.notes || '').trim();
 
-  const created = files.map((file) => {
-    const id = crypto.randomUUID();
-    return {
-      id,
-      originalName: file.originalname,
-      fileName: file.filename,
-      title: String(req.body.title || '').trim() || file.originalname,
-      type: assetType(file.filename),
-      mimeType: file.mimetype,
-      size: file.size,
-      tags,
-      notes,
-      createdAt: now,
-      updatedAt: now
-    };
-  });
+  const created = files.map((file) => createAssetItem({
+    originalName: file.originalname,
+    fileName: file.filename,
+    mimeType: file.mimetype,
+    size: file.size
+  }, {
+    title: req.body.title,
+    tags,
+    notes,
+    now
+  }));
 
   await writeLibrary([...created, ...items]);
   console.log(`[upload:saved] files=${created.length} libraryCount=${created.length + items.length}`);
+  const baseUrl = getBaseUrl(req);
+  res.json({
+    created: created.map((item) => ({
+      ...item,
+      url: `${baseUrl}/media/${encodeURIComponent(item.fileName)}`
+    }))
+  });
+});
+
+app.post('/api/assets/base64', requirePin, async (req, res) => {
+  const startedAt = Date.now();
+  const files = Array.isArray(req.body.files) ? req.body.files : [];
+  if (!files.length) return res.status(400).json({ error: 'No files were uploaded' });
+  if (files.length > 10) return res.status(400).json({ error: 'Base64 fallback supports up to 10 files per upload' });
+
+  await ensureStorage();
+  const items = await readLibrary();
+  const now = new Date().toISOString();
+  const tags = parseTags(req.body.tags);
+  const notes = String(req.body.notes || '').trim();
+  const created = [];
+
+  for (const file of files) {
+    const originalName = String(file.name || 'media').trim();
+    const ext = path.extname(originalName).toLowerCase();
+    if (!allowedExtensions.has(ext)) {
+      return res.status(400).json({ error: `Unsupported file type: ${ext || originalName}` });
+    }
+
+    const buffer = parseBase64Payload(file.data);
+    const maxBytes = JSON_UPLOAD_MAX_MB * 1024 * 1024;
+    if (!buffer.length) return res.status(400).json({ error: `${originalName} is empty` });
+    if (buffer.length > maxBytes) {
+      return res.status(413).json({ error: `${originalName} is too large for fallback upload (${JSON_UPLOAD_MAX_MB} MB max)` });
+    }
+
+    const fileName = makeStoredFilename(originalName);
+    await fs.writeFile(path.join(UPLOAD_DIR, fileName), buffer);
+    created.push(createAssetItem({
+      originalName,
+      fileName,
+      mimeType: String(file.mimeType || 'application/octet-stream'),
+      size: buffer.length
+    }, {
+      title: req.body.title,
+      tags,
+      notes,
+      now
+    }));
+  }
+
+  await writeLibrary([...created, ...items]);
+  console.log(`[upload:base64:saved] files=${created.length} bytes=${created.reduce((sum, item) => sum + item.size, 0)} ms=${Date.now() - startedAt}`);
   const baseUrl = getBaseUrl(req);
   res.json({
     created: created.map((item) => ({

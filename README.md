@@ -43,6 +43,7 @@ Port:
 PORT=3000
 PUBLIC_BASE_URL=https://library.yourdomain.com
 MAX_FILE_MB=100
+JSON_UPLOAD_MAX_MB=15
 LIBRARY_PIN=change-this-pin
 UPLOAD_DIR=/app/storage/uploads
 LIBRARY_FILE=/app/storage/library.json
@@ -111,6 +112,7 @@ If Railway shows `POST /api/assets 502` and these upload lines do not appear in 
 
 - Disable Railway Serverless for this service.
 - Test with a file smaller than 1 MB.
+- The UI automatically retries small files through `/api/assets/base64` when multipart upload is aborted.
 - Increase the Railway volume size if it is close to full.
 - Prefer a bucket/S3-compatible store for large videos.
 
