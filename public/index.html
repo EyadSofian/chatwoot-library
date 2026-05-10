@@ -866,21 +866,38 @@
     }
 
     async function api(path, options = {}) {
-      const response = await fetch(path, {
-        ...options,
-        headers: {
-          ...headers(),
-          ...(options.headers || {})
-        }
-      });
+      let response;
+      try {
+        response = await fetch(path, {
+          ...options,
+          headers: {
+            ...headers(),
+            ...(options.headers || {})
+          }
+        });
+      } catch (error) {
+        throw new Error(error?.message || 'Network error while connecting to the server');
+      }
+
       if (response.status === 401) {
         $('#pinDialog').showModal();
         throw new Error('PIN required');
       }
+
       if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || response.statusText);
+        const contentType = response.headers.get('content-type') || '';
+        let detail = '';
+        if (contentType.includes('application/json')) {
+          const data = await response.json().catch(() => ({}));
+          detail = data.error || data.message || '';
+        } else {
+          detail = await response.text().catch(() => '');
+          detail = detail.replace(/\s+/g, ' ').trim().slice(0, 260);
+        }
+        const baseMessage = `${response.status} ${response.statusText}`.trim();
+        throw new Error(detail ? `${baseMessage} - ${detail}` : baseMessage || 'Request failed');
       }
+
       return response.json();
     }
 
@@ -933,7 +950,8 @@
       form.append('notes', $('#notesInput').value);
 
       $('#uploadBtn').disabled = true;
-      log('Uploading...');
+      const totalBytes = state.selectedFiles.reduce((sum, file) => sum + file.size, 0);
+      log(`Uploading ${state.selectedFiles.length} file(s), ${formatBytes(totalBytes)}...`);
       try {
         const data = await api('/api/assets', { method: 'POST', body: form });
         log(`Uploaded ${data.created.length} file(s)`);
@@ -942,8 +960,9 @@
         $('#fileInput').value = '';
         await refreshAll();
       } catch (error) {
-        log(`UPLOAD ERROR: ${error.message}`);
-        toast(error.message);
+        const message = error?.message || String(error) || 'Unknown upload error';
+        log(`UPLOAD ERROR: ${message}`);
+        toast(message);
       } finally {
         $('#uploadBtn').disabled = false;
       }

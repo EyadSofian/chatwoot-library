@@ -97,6 +97,23 @@ Do not put `CHATWOOT_API_TOKEN` in the browser or inside `public/index.html`.
 
 For WhatsApp conversations, normal replies only work while Chatwoot reports `can_reply=true`. If the 24-hour WhatsApp window is closed, send an approved WhatsApp template instead.
 
+## Upload Troubleshooting
+
+During upload, the server logs:
+
+```text
+[upload:start]
+[upload:received]
+[upload:saved]
+```
+
+If Railway shows `POST /api/assets 502` and these upload lines do not appear in the service logs, the request is being interrupted before it reaches the app. In that case:
+
+- Disable Railway Serverless for this service.
+- Test with a file smaller than 1 MB.
+- Increase the Railway volume size if it is close to full.
+- Prefer a bucket/S3-compatible store for large videos.
+
 ## Supported File Types
 
 Images:
