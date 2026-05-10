@@ -1,0 +1,5 @@
+node_modules/
+storage/uploads/*
+storage/library.json
+.env
+.DS_Store
