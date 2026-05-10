@@ -1,5 +1,8 @@
 import express from 'express';
 import multer from 'multer';
+import axios from 'axios';
+import FormData from 'form-data';
+import { createReadStream } from 'fs';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -14,6 +17,9 @@ const LIBRARY_FILE = path.resolve(process.env.LIBRARY_FILE || path.join(appRoot,
 const MAX_FILE_MB = Number(process.env.MAX_FILE_MB || 100);
 const LIBRARY_PIN = process.env.LIBRARY_PIN || '';
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+const CHATWOOT_URL = (process.env.CHATWOOT_URL || '').replace(/\/$/, '');
+const CHATWOOT_API_TOKEN = process.env.CHATWOOT_API_TOKEN || '';
+const CHATWOOT_ACCOUNT_ID = process.env.CHATWOOT_ACCOUNT_ID || '';
 const app = express();
 
 const allowedExtensions = new Set([
@@ -84,6 +90,57 @@ async function readLibrary() {
 
 async function writeLibrary(items) {
   await fs.writeFile(LIBRARY_FILE, JSON.stringify(items, null, 2), 'utf8');
+}
+
+async function findAsset(id) {
+  const items = await readLibrary();
+  return items.find((item) => item.id === id);
+}
+
+function chatwootBaseUrl(req) {
+  const url = String(req.body.chatwootUrl || CHATWOOT_URL || '').replace(/\/$/, '');
+  if (!url) {
+    const referer = req.headers.referer || '';
+    const match = String(referer).match(/^https?:\/\/[^/]+/);
+    return match ? match[0] : '';
+  }
+  return url;
+}
+
+function resolveAccountId(req) {
+  return String(req.body.accountId || CHATWOOT_ACCOUNT_ID || '').trim();
+}
+
+function assertChatwootConfig(req) {
+  const baseUrl = chatwootBaseUrl(req);
+  const accountId = resolveAccountId(req);
+  const conversationId = String(req.body.conversationId || '').trim();
+
+  if (!CHATWOOT_API_TOKEN) {
+    const error = new Error('Missing CHATWOOT_API_TOKEN environment variable');
+    error.status = 500;
+    throw error;
+  }
+
+  if (!baseUrl) {
+    const error = new Error('Missing CHATWOOT_URL environment variable');
+    error.status = 400;
+    throw error;
+  }
+
+  if (!accountId || !conversationId) {
+    const error = new Error('Missing Chatwoot accountId or conversationId');
+    error.status = 400;
+    throw error;
+  }
+
+  if (req.body.canReply === false) {
+    const error = new Error('Chatwoot says this conversation cannot receive normal replies now');
+    error.status = 409;
+    throw error;
+  }
+
+  return { baseUrl, accountId, conversationId };
 }
 
 function parseTags(value) {
@@ -270,9 +327,74 @@ app.delete('/api/assets', requirePin, async (req, res) => {
   res.json({ deleted: toDelete.length });
 });
 
+app.post('/api/chatwoot/send-link', requirePin, async (req, res) => {
+  const { baseUrl, accountId, conversationId } = assertChatwootConfig(req);
+  const asset = await findAsset(String(req.body.assetId || ''));
+  if (!asset) return res.status(404).json({ error: 'Asset not found' });
+
+  const publicUrl = `${getBaseUrl(req)}/media/${encodeURIComponent(asset.fileName)}`;
+  const message = String(req.body.message || '').trim();
+  const content = message || `${asset.title || asset.originalName}\n${publicUrl}`;
+
+  const response = await axios.post(
+    `${baseUrl}/api/v1/accounts/${accountId}/conversations/${conversationId}/messages`,
+    {
+      content,
+      message_type: 'outgoing',
+      private: false,
+      content_type: 'text',
+      content_attributes: {}
+    },
+    {
+      headers: {
+        api_access_token: CHATWOOT_API_TOKEN,
+        'Content-Type': 'application/json'
+      },
+      timeout: 30000
+    }
+  );
+
+  res.json({ ok: true, mode: 'link', messageId: response.data?.id || null });
+});
+
+app.post('/api/chatwoot/send-attachment', requirePin, async (req, res) => {
+  const { baseUrl, accountId, conversationId } = assertChatwootConfig(req);
+  const asset = await findAsset(String(req.body.assetId || ''));
+  if (!asset) return res.status(404).json({ error: 'Asset not found' });
+
+  const filePath = path.join(UPLOAD_DIR, asset.fileName);
+  await fs.access(filePath);
+
+  const form = new FormData();
+  form.append('message_type', 'outgoing');
+  form.append('private', 'false');
+  form.append('content', String(req.body.content || '').trim());
+  form.append('attachments[]', createReadStream(filePath), {
+    filename: asset.originalName || asset.fileName,
+    contentType: asset.mimeType || 'application/octet-stream',
+    knownLength: asset.size || undefined
+  });
+
+  const response = await axios.post(
+    `${baseUrl}/api/v1/accounts/${accountId}/conversations/${conversationId}/messages`,
+    form,
+    {
+      headers: {
+        ...form.getHeaders(),
+        api_access_token: CHATWOOT_API_TOKEN
+      },
+      timeout: 60000,
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity
+    }
+  );
+
+  res.json({ ok: true, mode: 'attachment', messageId: response.data?.id || null });
+});
+
 app.use((error, _req, res, _next) => {
   console.error(error);
-  res.status(400).json({ error: error.message || 'Request failed' });
+  res.status(error.status || 400).json({ error: error.message || 'Request failed' });
 });
 
 await ensureStorage();

@@ -442,8 +442,12 @@
 
     .asset-actions {
       display: grid;
-      grid-template-columns: 1fr 1fr auto;
+      grid-template-columns: 1fr 1fr;
       gap: 7px;
+    }
+
+    .asset-actions .danger {
+      grid-column: auto;
     }
 
     .side {
@@ -464,6 +468,56 @@
       color: var(--muted);
       line-height: 1.7;
       font-size: 13px;
+    }
+
+    .context-card {
+      border: 1px solid var(--line);
+      background: var(--surface-muted);
+      border-radius: 8px;
+      padding: 11px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .context-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .context-row strong {
+      color: var(--text);
+      font-size: 13px;
+      text-align: end;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 24px;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 12px;
+      font-weight: 800;
+      background: var(--surface-2);
+      color: var(--text);
+    }
+
+    .pill.ok {
+      background: rgba(2, 122, 72, 0.12);
+      color: var(--ok);
+    }
+
+    .pill.warn {
+      background: rgba(181, 71, 8, 0.12);
+      color: var(--warn);
     }
 
     .log {
@@ -628,8 +682,14 @@
           </div>
         </div>
         <aside class="panel side">
+          <h3>المحادثة الحالية</h3>
+          <div class="context-card" id="contextCard">
+            <div class="context-row"><span>الحالة</span><strong id="contextStatus">جاري القراءة...</strong></div>
+            <div class="context-row"><span>العميل</span><strong id="contextContact">-</strong></div>
+            <div class="context-row"><span>الإرسال</span><strong id="contextReply">-</strong></div>
+          </div>
           <h3>استخدام الرابط في Chatwoot</h3>
-          <p class="hint">انسخ الرابط من زر Copy URL واستخدمه كـ image/video/file URL. لازم الدومين يكون HTTPS واللينك يفتح بدون تسجيل دخول.</p>
+          <p class="hint">استخدم Send link لإرسال رابط الملف، أو Send file لإرساله كمرفق حقيقي في نفس المحادثة.</p>
           <h3>ملاحظات التشغيل</h3>
           <p class="hint">لو هترفعها على Coolify، اربط مجلد التخزين كـ persistent volume عشان الملفات ما تضيعش مع أي redeploy.</p>
           <div class="log" id="logBox"></div>
@@ -659,7 +719,8 @@
       q: '',
       selectedFiles: [],
       config: { maxFileMb: 100, pinRequired: false },
-      pin: localStorage.getItem('libraryPin') || ''
+      pin: localStorage.getItem('libraryPin') || '',
+      appContext: null
     };
 
     const $ = (selector) => document.querySelector(selector);
@@ -718,6 +779,48 @@
       return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
     }
 
+    function isJSONValid(value) {
+      if (typeof value !== 'string') return false;
+      try {
+        JSON.parse(value);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    function getConversationContext() {
+      const data = state.appContext?.data || state.appContext || {};
+      const conversation = data.conversation || null;
+      const contact = data.contact || conversation?.meta?.sender || null;
+      return {
+        conversation,
+        contact,
+        currentAgent: data.currentAgent || null
+      };
+    }
+
+    function renderContext() {
+      const { conversation, contact } = getConversationContext();
+      const hasConversation = Boolean(conversation?.id);
+      const canReply = conversation?.can_reply !== false;
+      $('#contextStatus').innerHTML = hasConversation
+        ? `<span class="pill ${conversation.status === 'open' ? 'ok' : 'warn'}">${conversation.status || 'unknown'} #${conversation.id}</span>`
+        : '<span class="pill warn">مش داخل شات</span>';
+      $('#contextContact').textContent = contact?.name || contact?.phone_number || '-';
+      $('#contextReply').innerHTML = hasConversation
+        ? `<span class="pill ${canReply ? 'ok' : 'warn'}">${canReply ? 'مسموح' : 'غير مسموح الآن'}</span>`
+        : '-';
+    }
+
+    function requestChatwootContext() {
+      try {
+        window.parent.postMessage('chatwoot-dashboard-app:fetch-info', '*');
+      } catch {
+        // No parent frame outside Chatwoot.
+      }
+    }
+
     function typeLabel(type) {
       return { image: 'صورة', video: 'فيديو', audio: 'صوت', file: 'ملف' }[type] || type;
     }
@@ -749,6 +852,8 @@
               <span>${new Date(item.createdAt).toLocaleDateString()}</span>
             </div>
             <div class="asset-actions">
+              <button class="btn primary" type="button" data-send-file="${item.id}">${icon('send')}Send file</button>
+              <button class="btn" type="button" data-send-link="${item.id}">${icon('link')}Send link</button>
               <button class="btn" type="button" data-copy="${item.url}">${icon('copy')}Copy</button>
               <a class="btn" href="${item.url}" target="_blank" rel="noreferrer">${icon('external-link')}Open</a>
               <button class="btn icon danger" type="button" title="Delete" data-delete="${item.id}">${icon('trash-2')}</button>
@@ -860,6 +965,36 @@
       toast('تم نسخ الرابط');
     }
 
+    function getSendPayload(assetId) {
+      const { conversation } = getConversationContext();
+      if (!conversation?.id || !conversation?.account_id) {
+        throw new Error('افتح التطبيق من داخل محادثة Chatwoot الأول');
+      }
+      return {
+        assetId,
+        accountId: conversation.account_id,
+        conversationId: conversation.id,
+        canReply: conversation.can_reply
+      };
+    }
+
+    async function sendAsset(assetId, mode) {
+      const payload = getSendPayload(assetId);
+      const endpoint = mode === 'attachment' ? '/api/chatwoot/send-attachment' : '/api/chatwoot/send-link';
+      const label = mode === 'attachment' ? 'الملف' : 'الرابط';
+      if (!confirm(`تأكيد إرسال ${label} للعميل في نفس المحادثة؟`)) return;
+
+      log(`Sending ${mode} to Chatwoot conversation ${payload.conversationId}...`);
+      const data = await api(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      log(`Sent ${mode}. Message ID: ${data.messageId || '-'}`);
+      toast('تم الإرسال في الشات');
+      requestChatwootContext();
+    }
+
     $('#dropzone').addEventListener('click', () => $('#fileInput').click());
     $('#uploadTopBtn').addEventListener('click', () => $('#fileInput').click());
     $('#fileInput').addEventListener('change', (event) => setFiles(event.target.files));
@@ -894,8 +1029,18 @@
     grid.addEventListener('click', (event) => {
       const copyButton = event.target.closest('[data-copy]');
       const deleteButton = event.target.closest('[data-delete]');
+      const sendLinkButton = event.target.closest('[data-send-link]');
+      const sendFileButton = event.target.closest('[data-send-file]');
       if (copyButton) copyUrl(copyButton.dataset.copy);
       if (deleteButton) deleteAsset(deleteButton.dataset.delete);
+      if (sendLinkButton) sendAsset(sendLinkButton.dataset.sendLink, 'link').catch((error) => {
+        log(`SEND LINK ERROR: ${error.message}`);
+        toast(error.message);
+      });
+      if (sendFileButton) sendAsset(sendFileButton.dataset.sendFile, 'attachment').catch((error) => {
+        log(`SEND FILE ERROR: ${error.message}`);
+        toast(error.message);
+      });
     });
 
     const dropzone = $('#dropzone');
@@ -913,11 +1058,22 @@
     });
     dropzone.addEventListener('drop', (event) => setFiles(event.dataTransfer.files));
 
+    window.addEventListener('message', (event) => {
+      if (!isJSONValid(event.data)) return;
+      const eventData = JSON.parse(event.data);
+      if (eventData?.event !== 'appContext') return;
+      state.appContext = eventData;
+      renderContext();
+      log(`Chatwoot context loaded: conversation ${eventData.data?.conversation?.id || '-'}`);
+    });
+
     (async function init() {
       refreshIcons();
       updateThemeButton();
+      renderContext();
       await loadConfig();
       await refreshAll();
+      requestChatwootContext();
       log('Library ready');
     })();
   </script>

@@ -46,6 +46,9 @@ MAX_FILE_MB=100
 LIBRARY_PIN=change-this-pin
 UPLOAD_DIR=/app/storage/uploads
 LIBRARY_FILE=/app/storage/library.json
+CHATWOOT_URL=https://chat.yourdomain.com
+CHATWOOT_ACCOUNT_ID=2
+CHATWOOT_API_TOKEN=your-chatwoot-agent-token
 ```
 
 `PUBLIC_BASE_URL` is important when the app is behind a proxy, because generated links must be HTTPS direct links.
@@ -72,6 +75,27 @@ In Chatwoot:
 6. URL: your deployed app URL.
 
 Media files under `/media/...` remain public so WhatsApp and Chatwoot can fetch them directly.
+
+## Send Files Into The Current Chatwoot Conversation
+
+When the app is opened as a Chatwoot Dashboard App, it reads the current conversation context using Chatwoot's `appContext` postMessage event.
+
+Each library item has:
+
+- `Send link`: sends the public file URL as an outgoing text message.
+- `Send file`: sends the file as an outgoing Chatwoot attachment using multipart upload.
+
+For this to work, set:
+
+```env
+CHATWOOT_URL=https://chat.yourdomain.com
+CHATWOOT_ACCOUNT_ID=2
+CHATWOOT_API_TOKEN=your-chatwoot-agent-token
+```
+
+Do not put `CHATWOOT_API_TOKEN` in the browser or inside `public/index.html`.
+
+For WhatsApp conversations, normal replies only work while Chatwoot reports `can_reply=true`. If the 24-hour WhatsApp window is closed, send an approved WhatsApp template instead.
 
 ## Supported File Types
 
