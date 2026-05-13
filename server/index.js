@@ -50,6 +50,14 @@ function assetType(filename) {
   return typeByExtension[path.extname(filename).toLowerCase()] || 'file';
 }
 
+function decodeMulterFilename(name) {
+  try {
+    return Buffer.from(name, 'latin1').toString('utf8');
+  } catch {
+    return name;
+  }
+}
+
 function cleanName(value) {
   const ext = path.extname(value).toLowerCase();
   const base = path.basename(value, ext)
@@ -202,7 +210,7 @@ const storage = multer.diskStorage({
     }
   },
   filename: (_req, file, cb) => {
-    cb(null, makeStoredFilename(file.originalname));
+    cb(null, makeStoredFilename(decodeMulterFilename(file.originalname)));
   }
 });
 
@@ -213,7 +221,7 @@ const upload = multer({
     files: 50
   },
   fileFilter: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
+    const ext = path.extname(decodeMulterFilename(file.originalname)).toLowerCase();
     if (!allowedExtensions.has(ext)) {
       cb(new Error(`Unsupported file type: ${ext}`));
       return;
@@ -315,7 +323,7 @@ app.post('/api/assets', requirePin, uploadAssetFiles, async (req, res) => {
   const notes = String(req.body.notes || '').trim();
 
   const created = files.map((file) => createAssetItem({
-    originalName: file.originalname,
+    originalName: decodeMulterFilename(file.originalname),
     fileName: file.filename,
     mimeType: file.mimetype,
     size: file.size
