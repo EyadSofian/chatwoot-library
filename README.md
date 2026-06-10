@@ -50,9 +50,30 @@ LIBRARY_FILE=/app/storage/library.json
 CHATWOOT_URL=https://chat.yourdomain.com
 CHATWOOT_ACCOUNT_ID=2
 CHATWOOT_API_TOKEN=your-chatwoot-agent-token
+PRIVATE_LIBRARY_EMAIL=ahmed.farouk@engosoft.com
+PRIVATE_LIBRARY_PIN=use-a-strong-private-pin
 ```
 
 `PUBLIC_BASE_URL` is important when the app is behind a proxy, because generated links must be HTTPS direct links.
+
+## Ahmed's Private Library
+
+The app exposes a separate private library when Chatwoot reports the current agent as:
+
+```text
+ahmed.farouk@engosoft.com
+```
+
+Set `PRIVATE_LIBRARY_PIN` to enable it. The email controls who sees the private-library tab, while the separate PIN protects every private API request on the server.
+
+Private files:
+
+- Do not appear in shared lists, search results, or storage totals.
+- Cannot be opened from the public `/media/...` route.
+- Can be opened through the protected app view.
+- Can be sent to Chatwoot as attachments, but cannot be sent or copied as public links.
+
+`PRIVATE_LIBRARY_EMAIL` can be changed later if ownership moves to a different agent.
 
 ## Persistent Storage
 

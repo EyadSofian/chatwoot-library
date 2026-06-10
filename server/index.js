@@ -21,6 +21,10 @@ const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
 const CHATWOOT_URL = (process.env.CHATWOOT_URL || '').replace(/\/$/, '');
 const CHATWOOT_API_TOKEN = process.env.CHATWOOT_API_TOKEN || '';
 const CHATWOOT_ACCOUNT_ID = process.env.CHATWOOT_ACCOUNT_ID || '';
+const PRIVATE_LIBRARY_EMAIL = String(
+  process.env.PRIVATE_LIBRARY_EMAIL || 'ahmed.farouk@engosoft.com'
+).trim().toLowerCase();
+const PRIVATE_LIBRARY_PIN = String(process.env.PRIVATE_LIBRARY_PIN || '');
 const app = express();
 
 const allowedExtensions = new Set([
@@ -106,6 +110,68 @@ async function findAsset(id) {
   return items.find((item) => item.id === id);
 }
 
+async function findAssetByFileName(fileName) {
+  const items = await readLibrary();
+  return items.find((item) => item.fileName === fileName);
+}
+
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function safeEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left || ''));
+  const rightBuffer = Buffer.from(String(right || ''));
+  return leftBuffer.length === rightBuffer.length
+    && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function requestScope(req) {
+  const scope = String(
+    req.headers['x-library-scope'] || req.query.scope || req.body?.scope || 'shared'
+  ).trim().toLowerCase();
+  return scope === 'private' ? 'private' : 'shared';
+}
+
+function isPrivateAsset(item) {
+  return item?.visibility === 'private';
+}
+
+function hasPrivateAccess(req) {
+  if (!PRIVATE_LIBRARY_PIN) return false;
+  const email = normalizeEmail(req.headers['x-agent-email']);
+  const pin = String(req.headers['x-private-library-pin'] || '');
+  return safeEqual(email, PRIVATE_LIBRARY_EMAIL) && safeEqual(pin, PRIVATE_LIBRARY_PIN);
+}
+
+function requireScopeAccess(req, res, next) {
+  if (requestScope(req) !== 'private') return next();
+  if (!PRIVATE_LIBRARY_PIN) {
+    return res.status(503).json({ error: 'Private library is not configured' });
+  }
+  if (!hasPrivateAccess(req)) {
+    return res.status(403).json({ error: 'Private library access denied' });
+  }
+  return next();
+}
+
+function canAccessAsset(req, item) {
+  if (!isPrivateAsset(item)) return true;
+  return hasPrivateAccess(req)
+    && normalizeEmail(item.ownerEmail) === PRIVATE_LIBRARY_EMAIL;
+}
+
+function assetResponse(item, req) {
+  const isPrivate = isPrivateAsset(item);
+  return {
+    ...item,
+    isPublic: !isPrivate,
+    url: isPrivate
+      ? `${getBaseUrl(req)}/api/assets/${encodeURIComponent(item.id)}/content`
+      : `${getBaseUrl(req)}/media/${encodeURIComponent(item.fileName)}`
+  };
+}
+
 function chatwootBaseUrl(req) {
   const url = String(req.body.chatwootUrl || CHATWOOT_URL || '').replace(/\/$/, '');
   if (!url) {
@@ -181,6 +247,8 @@ function createAssetItem(file, extra = {}) {
     size: file.size,
     tags: extra.tags || [],
     notes: extra.notes || '',
+    visibility: extra.visibility === 'private' ? 'private' : 'shared',
+    ownerEmail: extra.visibility === 'private' ? normalizeEmail(extra.ownerEmail) : null,
     createdAt: now,
     updatedAt: now
   };
@@ -253,13 +321,16 @@ function uploadAssetFiles(req, res, next) {
 app.use('/api/assets/base64', express.json({ limit: `${JSON_UPLOAD_MAX_MB + 2}mb` }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(appRoot, 'public')));
-app.use('/media', express.static(UPLOAD_DIR, {
-  etag: true,
-  maxAge: '7d',
-  setHeaders: (res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+
+app.get('/media/:fileName', async (req, res) => {
+  const item = await findAssetByFileName(req.params.fileName);
+  if (!item || isPrivateAsset(item)) {
+    return res.status(404).json({ error: 'Asset not found' });
   }
-}));
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 'public, max-age=604800');
+  return res.sendFile(path.join(UPLOAD_DIR, item.fileName));
+});
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, app: 'chatwoot-library-app' });
@@ -270,17 +341,25 @@ app.get('/api/config', (_req, res) => {
     maxFileMb: MAX_FILE_MB,
     jsonUploadMaxMb: JSON_UPLOAD_MAX_MB,
     pinRequired: Boolean(LIBRARY_PIN),
-    allowedExtensions: Array.from(allowedExtensions).sort()
+    allowedExtensions: Array.from(allowedExtensions).sort(),
+    privateLibrary: {
+      email: PRIVATE_LIBRARY_EMAIL,
+      configured: Boolean(PRIVATE_LIBRARY_PIN)
+    }
   });
 });
 
-app.get('/api/assets', requirePin, async (req, res) => {
+app.get('/api/assets', requirePin, requireScopeAccess, async (req, res) => {
   const items = await readLibrary();
+  const scope = requestScope(req);
   const q = String(req.query.q || '').trim().toLowerCase();
   const type = String(req.query.type || 'all');
   const tag = String(req.query.tag || '').trim().toLowerCase();
 
   const filtered = items
+    .filter((item) => scope === 'private'
+      ? isPrivateAsset(item) && normalizeEmail(item.ownerEmail) === PRIVATE_LIBRARY_EMAIL
+      : !isPrivateAsset(item))
     .filter((item) => type === 'all' || item.type === type)
     .filter((item) => !tag || item.tags?.some((itemTag) => itemTag.toLowerCase() === tag))
     .filter((item) => {
@@ -294,17 +373,17 @@ app.get('/api/assets', requirePin, async (req, res) => {
     })
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-  const baseUrl = getBaseUrl(req);
   res.json({
-    items: filtered.map((item) => ({
-      ...item,
-      url: `${baseUrl}/media/${encodeURIComponent(item.fileName)}`
-    }))
+    items: filtered.map((item) => assetResponse(item, req))
   });
 });
 
-app.get('/api/storage', requirePin, async (req, res) => {
-  const items = await readLibrary();
+app.get('/api/storage', requirePin, requireScopeAccess, async (req, res) => {
+  const scope = requestScope(req);
+  const allItems = await readLibrary();
+  const items = allItems.filter((item) => scope === 'private'
+    ? isPrivateAsset(item) && normalizeEmail(item.ownerEmail) === PRIVATE_LIBRARY_EMAIL
+    : !isPrivateAsset(item));
   const totalBytes = items.reduce((sum, item) => sum + Number(item.size || 0), 0);
   const byType = items.reduce((acc, item) => {
     acc[item.type] = (acc[item.type] || 0) + Number(item.size || 0);
@@ -313,7 +392,7 @@ app.get('/api/storage', requirePin, async (req, res) => {
   res.json({ totalBytes, count: items.length, byType, baseUrl: getBaseUrl(req) });
 });
 
-app.post('/api/assets', requirePin, uploadAssetFiles, async (req, res) => {
+app.post('/api/assets', requirePin, requireScopeAccess, uploadAssetFiles, async (req, res) => {
   const files = req.files || [];
   if (!files.length) return res.status(400).json({ error: 'No files were uploaded' });
 
@@ -321,6 +400,7 @@ app.post('/api/assets', requirePin, uploadAssetFiles, async (req, res) => {
   const now = new Date().toISOString();
   const tags = parseTags(req.body.tags);
   const notes = String(req.body.notes || '').trim();
+  const visibility = requestScope(req);
 
   const created = files.map((file) => createAssetItem({
     originalName: decodeMulterFilename(file.originalname),
@@ -331,21 +411,19 @@ app.post('/api/assets', requirePin, uploadAssetFiles, async (req, res) => {
     title: req.body.title,
     tags,
     notes,
+    visibility,
+    ownerEmail: visibility === 'private' ? PRIVATE_LIBRARY_EMAIL : null,
     now
   }));
 
   await writeLibrary([...created, ...items]);
   console.log(`[upload:saved] files=${created.length} libraryCount=${created.length + items.length}`);
-  const baseUrl = getBaseUrl(req);
   res.json({
-    created: created.map((item) => ({
-      ...item,
-      url: `${baseUrl}/media/${encodeURIComponent(item.fileName)}`
-    }))
+    created: created.map((item) => assetResponse(item, req))
   });
 });
 
-app.post('/api/assets/base64', requirePin, async (req, res) => {
+app.post('/api/assets/base64', requirePin, requireScopeAccess, async (req, res) => {
   const startedAt = Date.now();
   const files = Array.isArray(req.body.files) ? req.body.files : [];
   if (!files.length) return res.status(400).json({ error: 'No files were uploaded' });
@@ -356,6 +434,7 @@ app.post('/api/assets/base64', requirePin, async (req, res) => {
   const now = new Date().toISOString();
   const tags = parseTags(req.body.tags);
   const notes = String(req.body.notes || '').trim();
+  const visibility = requestScope(req);
   const created = [];
 
   for (const file of files) {
@@ -383,18 +462,16 @@ app.post('/api/assets/base64', requirePin, async (req, res) => {
       title: req.body.title,
       tags,
       notes,
+      visibility,
+      ownerEmail: visibility === 'private' ? PRIVATE_LIBRARY_EMAIL : null,
       now
     }));
   }
 
   await writeLibrary([...created, ...items]);
   console.log(`[upload:base64:saved] files=${created.length} bytes=${created.reduce((sum, item) => sum + item.size, 0)} ms=${Date.now() - startedAt}`);
-  const baseUrl = getBaseUrl(req);
   res.json({
-    created: created.map((item) => ({
-      ...item,
-      url: `${baseUrl}/media/${encodeURIComponent(item.fileName)}`
-    }))
+    created: created.map((item) => assetResponse(item, req))
   });
 });
 
@@ -402,6 +479,9 @@ app.patch('/api/assets/:id', requirePin, async (req, res) => {
   const items = await readLibrary();
   const index = items.findIndex((item) => item.id === req.params.id);
   if (index === -1) return res.status(404).json({ error: 'Asset not found' });
+  if (!canAccessAsset(req, items[index])) {
+    return res.status(404).json({ error: 'Asset not found' });
+  }
 
   items[index] = {
     ...items[index],
@@ -419,6 +499,9 @@ app.delete('/api/assets/:id', requirePin, async (req, res) => {
   const items = await readLibrary();
   const item = items.find((candidate) => candidate.id === req.params.id);
   if (!item) return res.status(404).json({ error: 'Asset not found' });
+  if (!canAccessAsset(req, item)) {
+    return res.status(404).json({ error: 'Asset not found' });
+  }
 
   const nextItems = items.filter((candidate) => candidate.id !== req.params.id);
   await writeLibrary(nextItems);
@@ -430,17 +513,32 @@ app.delete('/api/assets', requirePin, async (req, res) => {
   const ids = Array.isArray(req.body.ids) ? req.body.ids : [];
   const idSet = new Set(ids);
   const items = await readLibrary();
-  const toDelete = items.filter((item) => idSet.has(item.id));
-  const keep = items.filter((item) => !idSet.has(item.id));
+  const toDelete = items.filter((item) => idSet.has(item.id) && canAccessAsset(req, item));
+  const deletedIds = new Set(toDelete.map((item) => item.id));
+  const keep = items.filter((item) => !deletedIds.has(item.id));
   await writeLibrary(keep);
   await Promise.all(toDelete.map((item) => fs.rm(path.join(UPLOAD_DIR, item.fileName), { force: true })));
   res.json({ deleted: toDelete.length });
+});
+
+app.get('/api/assets/:id/content', requirePin, async (req, res) => {
+  const asset = await findAsset(req.params.id);
+  if (!asset || !isPrivateAsset(asset) || !canAccessAsset(req, asset)) {
+    return res.status(404).json({ error: 'Asset not found' });
+  }
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.type(asset.mimeType || 'application/octet-stream');
+  return res.sendFile(path.join(UPLOAD_DIR, asset.fileName));
 });
 
 app.post('/api/chatwoot/send-link', requirePin, async (req, res) => {
   const { baseUrl, accountId, conversationId } = assertChatwootConfig(req);
   const asset = await findAsset(String(req.body.assetId || ''));
   if (!asset) return res.status(404).json({ error: 'Asset not found' });
+  if (!canAccessAsset(req, asset)) return res.status(404).json({ error: 'Asset not found' });
+  if (isPrivateAsset(asset)) {
+    return res.status(409).json({ error: 'Private files can only be sent as attachments' });
+  }
 
   const publicUrl = `${getBaseUrl(req)}/media/${encodeURIComponent(asset.fileName)}`;
   const message = String(req.body.message || '').trim();
@@ -471,6 +569,7 @@ app.post('/api/chatwoot/send-attachment', requirePin, async (req, res) => {
   const { baseUrl, accountId, conversationId } = assertChatwootConfig(req);
   const asset = await findAsset(String(req.body.assetId || ''));
   if (!asset) return res.status(404).json({ error: 'Asset not found' });
+  if (!canAccessAsset(req, asset)) return res.status(404).json({ error: 'Asset not found' });
 
   const filePath = path.join(UPLOAD_DIR, asset.fileName);
   await fs.access(filePath);

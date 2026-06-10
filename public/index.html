@@ -300,6 +300,24 @@
       padding: 14px;
     }
 
+    .scope-switch {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .scope-switch[hidden] {
+      display: none;
+    }
+
+    .scope-label {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+      margin-inline-end: 4px;
+    }
+
     .filters {
       display: flex;
       gap: 8px;
@@ -632,6 +650,12 @@
     </header>
 
     <main class="shell">
+      <section class="scope-switch" id="libraryScopes" hidden>
+        <span class="scope-label">Library:</span>
+        <button class="tab active" data-scope="shared" type="button"><i data-lucide="users"></i>Shared</button>
+        <button class="tab" data-scope="private" type="button"><i data-lucide="lock-keyhole"></i>Ahmed Private</button>
+      </section>
+
       <section class="panel upload-panel">
         <div class="dropzone" id="dropzone">
           <input id="fileInput" type="file" multiple hidden />
@@ -710,6 +734,18 @@
     </form>
   </dialog>
 
+  <dialog id="privatePinDialog">
+    <form method="dialog" class="dialog-body">
+      <h2 class="dialog-title">Ahmed Private Library</h2>
+      <p class="hint">Enter the private library PIN. It is kept for this browser session only.</p>
+      <input id="privatePinInput" class="input" type="password" autocomplete="current-password" />
+      <div class="top-actions">
+        <button class="btn ghost" value="cancel" type="submit">Cancel</button>
+        <button class="btn primary" id="savePrivatePinBtn" value="default" type="button">Open private library</button>
+      </div>
+    </form>
+  </dialog>
+
   <div class="toast" id="toast"></div>
 
   <script>
@@ -718,9 +754,17 @@
       type: 'all',
       q: '',
       selectedFiles: [],
-      config: { maxFileMb: 100, jsonUploadMaxMb: 15, pinRequired: false },
+      config: {
+        maxFileMb: 100,
+        jsonUploadMaxMb: 15,
+        pinRequired: false,
+        privateLibrary: { email: 'ahmed.farouk@engosoft.com', configured: false }
+      },
       pin: localStorage.getItem('libraryPin') || '',
-      appContext: null
+      privatePin: sessionStorage.getItem('privateLibraryPin') || '',
+      scope: 'shared',
+      appContext: null,
+      objectUrls: []
     };
 
     const $ = (selector) => document.querySelector(selector);
@@ -768,7 +812,14 @@
     }
 
     function headers() {
-      return state.pin ? { 'x-library-pin': state.pin } : {};
+      const result = { 'x-library-scope': state.scope };
+      const agentEmail = getAgentEmail();
+      if (state.pin) result['x-library-pin'] = state.pin;
+      if (agentEmail) result['x-agent-email'] = agentEmail;
+      if (state.scope === 'private' && state.privatePin) {
+        result['x-private-library-pin'] = state.privatePin;
+      }
+      return result;
     }
 
     function formatBytes(bytes) {
@@ -805,8 +856,27 @@
       return {
         conversation,
         contact,
-        currentAgent: data.currentAgent || null
+        currentAgent: data.currentAgent || data.current_agent || null
       };
+    }
+
+    function getAgentEmail() {
+      const { currentAgent } = getConversationContext();
+      return String(currentAgent?.email || '').trim().toLowerCase();
+    }
+
+    function isPrivateLibraryOwner() {
+      return getAgentEmail()
+        && getAgentEmail() === String(state.config.privateLibrary?.email || '').trim().toLowerCase();
+    }
+
+    function updateScopeUi() {
+      const scopes = $('#libraryScopes');
+      scopes.hidden = !isPrivateLibraryOwner();
+      scopes.querySelectorAll('[data-scope]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.scope === state.scope);
+      });
+      refreshIcons();
     }
 
     function renderContext() {
@@ -835,11 +905,12 @@
     }
 
     function renderPreview(item) {
+      const mediaUrl = item.displayUrl || item.url;
       if (item.type === 'image') {
-        return `<img src="${item.url}" alt="${item.title || item.originalName}" loading="lazy" />`;
+        return `<img src="${mediaUrl}" alt="${item.title || item.originalName}" loading="lazy" />`;
       }
       if (item.type === 'video') {
-        return `<video src="${item.url}" muted preload="metadata"></video>`;
+        return `<video src="${mediaUrl}" muted preload="metadata"></video>`;
       }
       if (item.type === 'audio') {
         return `<div class="file-preview">${icon('volume-2')}<span>${item.originalName}</span></div>`;
@@ -862,9 +933,11 @@
             </div>
             <div class="asset-actions">
               <button class="btn primary" type="button" data-send-file="${item.id}">${icon('send')}Send file</button>
-              <button class="btn" type="button" data-send-link="${item.id}">${icon('link')}Send link</button>
-              <button class="btn" type="button" data-copy="${item.url}">${icon('copy')}Copy</button>
-              <a class="btn" href="${item.url}" target="_blank" rel="noreferrer">${icon('external-link')}Open</a>
+              ${item.isPublic
+                ? `<button class="btn" type="button" data-send-link="${item.id}">${icon('link')}Send link</button>
+                   <button class="btn" type="button" data-copy="${item.url}">${icon('copy')}Copy</button>
+                   <a class="btn" href="${item.url}" target="_blank" rel="noreferrer">${icon('external-link')}Open</a>`
+                : `<button class="btn" type="button" data-open-private="${item.id}">${icon('external-link')}Open privately</button>`}
               <button class="btn icon danger" type="button" title="Delete" data-delete="${item.id}">${icon('trash-2')}</button>
             </div>
           </div>
@@ -872,6 +945,32 @@
       `).join('');
       emptyState.hidden = state.assets.length > 0;
       refreshIcons();
+    }
+
+    function clearObjectUrls() {
+      state.objectUrls.forEach((url) => URL.revokeObjectURL(url));
+      state.objectUrls = [];
+    }
+
+    async function fetchBlob(path) {
+      const response = await fetch(path, { headers: headers() });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || `${response.status} ${response.statusText}`);
+      }
+      return response.blob();
+    }
+
+    async function preparePrivatePreviews(items) {
+      clearObjectUrls();
+      if (state.scope !== 'private') return items;
+      return Promise.all(items.map(async (item) => {
+        if (!['image', 'video'].includes(item.type)) return item;
+        const blob = await fetchBlob(item.url);
+        const displayUrl = URL.createObjectURL(blob);
+        state.objectUrls.push(displayUrl);
+        return { ...item, displayUrl };
+      }));
     }
 
     async function api(path, options = {}) {
@@ -891,6 +990,10 @@
       if (response.status === 401) {
         $('#pinDialog').showModal();
         throw new Error('PIN required');
+      }
+
+      if (response.status === 403 && state.scope === 'private') {
+        $('#privatePinDialog').showModal();
       }
 
       if (!response.ok) {
@@ -920,7 +1023,7 @@
     async function loadAssets() {
       const params = new URLSearchParams({ type: state.type, q: state.q });
       const data = await api(`/api/assets?${params}`);
-      state.assets = data.items;
+      state.assets = await preparePrivatePreviews(data.items);
       render();
     }
 
@@ -937,6 +1040,26 @@
       } catch (error) {
         log(`ERROR: ${error.message}`);
       }
+    }
+
+    async function switchScope(scope) {
+      if (scope === 'private') {
+        if (!isPrivateLibraryOwner()) {
+          toast('This private library is only available to its owner');
+          return;
+        }
+        if (!state.config.privateLibrary?.configured) {
+          toast('Set PRIVATE_LIBRARY_PIN on the server first');
+          return;
+        }
+        if (!state.privatePin) {
+          $('#privatePinDialog').showModal();
+          return;
+        }
+      }
+      state.scope = scope;
+      updateScopeUi();
+      await refreshAll();
     }
 
     function setFiles(files) {
@@ -1027,6 +1150,21 @@
       toast('تم نسخ الرابط');
     }
 
+    async function openPrivateAsset(id) {
+      const item = state.assets.find((asset) => asset.id === id);
+      if (!item) return;
+      const target = window.open('', '_blank');
+      try {
+        const blob = await fetchBlob(item.url);
+        const objectUrl = URL.createObjectURL(blob);
+        state.objectUrls.push(objectUrl);
+        if (target) target.location = objectUrl;
+      } catch (error) {
+        if (target) target.close();
+        throw error;
+      }
+    }
+
     function getSendPayload(assetId) {
       const { conversation } = getConversationContext();
       if (!conversation?.id || !conversation?.account_id) {
@@ -1074,6 +1212,18 @@
       await refreshAll();
     });
 
+    $('#savePrivatePinBtn').addEventListener('click', async () => {
+      state.privatePin = $('#privatePinInput').value;
+      sessionStorage.setItem('privateLibraryPin', state.privatePin);
+      $('#privatePinDialog').close();
+      await switchScope('private');
+    });
+
+    $('#libraryScopes').addEventListener('click', (event) => {
+      const button = event.target.closest('[data-scope]');
+      if (button) switchScope(button.dataset.scope);
+    });
+
     $('#searchInput').addEventListener('input', (event) => {
       state.q = event.target.value;
       clearTimeout(window.searchTimer);
@@ -1093,8 +1243,13 @@
       const deleteButton = event.target.closest('[data-delete]');
       const sendLinkButton = event.target.closest('[data-send-link]');
       const sendFileButton = event.target.closest('[data-send-file]');
+      const openPrivateButton = event.target.closest('[data-open-private]');
       if (copyButton) copyUrl(copyButton.dataset.copy);
       if (deleteButton) deleteAsset(deleteButton.dataset.delete);
+      if (openPrivateButton) openPrivateAsset(openPrivateButton.dataset.openPrivate).catch((error) => {
+        log(`OPEN ERROR: ${error.message}`);
+        toast(error.message);
+      });
       if (sendLinkButton) sendAsset(sendLinkButton.dataset.sendLink, 'link').catch((error) => {
         log(`SEND LINK ERROR: ${error.message}`);
         toast(error.message);
@@ -1126,6 +1281,8 @@
       if (eventData?.event !== 'appContext') return;
       state.appContext = eventData;
       renderContext();
+      updateScopeUi();
+      if (state.scope === 'private' && !isPrivateLibraryOwner()) switchScope('shared');
       log(`Chatwoot context loaded: conversation ${eventData.data?.conversation?.id || '-'}`);
     });
 
@@ -1134,6 +1291,7 @@
       updateThemeButton();
       renderContext();
       await loadConfig();
+      updateScopeUi();
       await refreshAll();
       requestChatwootContext();
       log('Library ready');
