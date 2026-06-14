@@ -397,6 +397,11 @@
       min-width: 0;
     }
 
+    .asset.selected {
+      border-color: var(--brand);
+      box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.12);
+    }
+
     .preview {
       background: var(--surface-2);
       display: grid;
@@ -434,6 +439,29 @@
       font-weight: 700;
     }
 
+    .asset-select {
+      position: absolute;
+      top: 8px;
+      inset-inline-end: 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 28px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+      z-index: 2;
+    }
+
+    .asset-select input {
+      accent-color: var(--brand);
+    }
+
     .asset-body {
       padding: 11px;
       display: grid;
@@ -466,6 +494,30 @@
 
     .asset-actions .danger {
       grid-column: auto;
+    }
+
+    .bulk-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 12px 14px;
+    }
+
+    .bulk-bar[hidden] {
+      display: none;
+    }
+
+    .bulk-status {
+      color: var(--text-strong);
+      font-weight: 800;
+    }
+
+    .bulk-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
     }
 
     .side {
@@ -687,11 +739,22 @@
       <section class="panel toolbar">
         <input id="searchInput" class="input" placeholder="بحث باسم الملف، tag، أو ملاحظة" />
         <div class="filters" id="filters">
+          <button class="tab" id="selectAllBtn" type="button"><i data-lucide="check-square"></i>Select all</button>
           <button class="tab active" data-type="all" type="button"><i data-lucide="layout-grid"></i>الكل</button>
           <button class="tab" data-type="image" type="button"><i data-lucide="image"></i>صور</button>
           <button class="tab" data-type="video" type="button"><i data-lucide="video"></i>فيديو</button>
           <button class="tab" data-type="audio" type="button"><i data-lucide="volume-2"></i>صوت</button>
           <button class="tab" data-type="file" type="button"><i data-lucide="file"></i>ملفات</button>
+        </div>
+      </section>
+
+      <section class="panel bulk-bar" id="bulkBar" hidden>
+        <div class="bulk-status" id="bulkStatus">0 selected</div>
+        <div class="bulk-actions">
+          <button class="btn" id="bulkCopyBtn" type="button"><i data-lucide="copy"></i><span>Copy links</span></button>
+          <button class="btn" id="bulkSendLinksBtn" type="button"><i data-lucide="link"></i><span>Send links</span></button>
+          <button class="btn primary" id="bulkSendFilesBtn" type="button"><i data-lucide="send"></i><span>Send files</span></button>
+          <button class="btn ghost" id="clearSelectionBtn" type="button"><i data-lucide="x"></i><span>Clear</span></button>
         </div>
       </section>
 
@@ -764,6 +827,7 @@
       privatePin: sessionStorage.getItem('privateLibraryPin') || '',
       scope: 'shared',
       appContext: null,
+      selectedAssetIds: new Set(),
       objectUrls: []
     };
 
@@ -854,10 +918,23 @@
       const conversation = data.conversation || null;
       const contact = data.contact || conversation?.meta?.sender || null;
       return {
+        data,
         conversation,
         contact,
         currentAgent: data.currentAgent || data.current_agent || null
       };
+    }
+
+    function resolveAccountId() {
+      const { data, conversation } = getConversationContext();
+      return conversation?.account_id
+        || conversation?.accountId
+        || conversation?.account?.id
+        || conversation?.meta?.assignee?.account_id
+        || data.account_id
+        || data.accountId
+        || data.account?.id
+        || null;
     }
 
     function getAgentEmail() {
@@ -877,6 +954,39 @@
         button.classList.toggle('active', button.dataset.scope === state.scope);
       });
       refreshIcons();
+    }
+
+    function selectedAssets() {
+      return state.assets.filter((item) => state.selectedAssetIds.has(item.id));
+    }
+
+    function pruneSelection() {
+      const visibleIds = new Set(state.assets.map((item) => item.id));
+      for (const id of Array.from(state.selectedAssetIds)) {
+        if (!visibleIds.has(id)) state.selectedAssetIds.delete(id);
+      }
+    }
+
+    function updateBulkUi() {
+      const count = state.selectedAssetIds.size;
+      $('#bulkBar').hidden = count === 0;
+      $('#bulkStatus').textContent = `${count} selected`;
+      $('#selectAllBtn').classList.toggle('active', count > 0 && count === state.assets.length);
+      refreshIcons();
+    }
+
+    function clearSelection() {
+      state.selectedAssetIds.clear();
+      render();
+    }
+
+    function toggleSelectAll() {
+      if (state.assets.length && state.selectedAssetIds.size === state.assets.length) {
+        state.selectedAssetIds.clear();
+      } else {
+        state.assets.forEach((item) => state.selectedAssetIds.add(item.id));
+      }
+      render();
     }
 
     function renderContext() {
@@ -905,7 +1015,7 @@
     }
 
     function renderPreview(item) {
-      const mediaUrl = item.displayUrl || item.url;
+      const mediaUrl = item.displayUrl || item.contentUrl || item.url;
       if (item.type === 'image') {
         return `<img src="${mediaUrl}" alt="${item.title || item.originalName}" loading="lazy" />`;
       }
@@ -919,10 +1029,15 @@
     }
 
     function render() {
+      pruneSelection();
       grid.innerHTML = state.assets.map((item) => `
-        <article class="asset">
+        <article class="asset ${state.selectedAssetIds.has(item.id) ? 'selected' : ''}">
           <div class="preview">
             <span class="badge">${typeLabel(item.type)}</span>
+            <label class="asset-select">
+              <input type="checkbox" data-select="${item.id}" ${state.selectedAssetIds.has(item.id) ? 'checked' : ''} />
+              <span>Select</span>
+            </label>
             ${renderPreview(item)}
           </div>
           <div class="asset-body">
@@ -933,17 +1048,16 @@
             </div>
             <div class="asset-actions">
               <button class="btn primary" type="button" data-send-file="${item.id}">${icon('send')}Send file</button>
-              ${item.isPublic
-                ? `<button class="btn" type="button" data-send-link="${item.id}">${icon('link')}Send link</button>
-                   <button class="btn" type="button" data-copy="${item.url}">${icon('copy')}Copy</button>
-                   <a class="btn" href="${item.url}" target="_blank" rel="noreferrer">${icon('external-link')}Open</a>`
-                : `<button class="btn" type="button" data-open-private="${item.id}">${icon('external-link')}Open privately</button>`}
+              <button class="btn" type="button" data-send-link="${item.id}">${icon('link')}Send link</button>
+              <button class="btn" type="button" data-copy="${item.url}">${icon('copy')}Copy</button>
+              <a class="btn" href="${item.url}" target="_blank" rel="noreferrer">${icon('external-link')}Open</a>
               <button class="btn icon danger" type="button" title="Delete" data-delete="${item.id}">${icon('trash-2')}</button>
             </div>
           </div>
         </article>
       `).join('');
       emptyState.hidden = state.assets.length > 0;
+      updateBulkUi();
       refreshIcons();
     }
 
@@ -966,7 +1080,7 @@
       if (state.scope !== 'private') return items;
       return Promise.all(items.map(async (item) => {
         if (!['image', 'video'].includes(item.type)) return item;
-        const blob = await fetchBlob(item.url);
+        const blob = await fetchBlob(item.contentUrl || item.url);
         const displayUrl = URL.createObjectURL(blob);
         state.objectUrls.push(displayUrl);
         return { ...item, displayUrl };
@@ -1058,6 +1172,7 @@
         }
       }
       state.scope = scope;
+      state.selectedAssetIds.clear();
       updateScopeUi();
       await refreshAll();
     }
@@ -1150,47 +1265,42 @@
       toast('تم نسخ الرابط');
     }
 
-    async function openPrivateAsset(id) {
-      const item = state.assets.find((asset) => asset.id === id);
-      if (!item) return;
-      const target = window.open('', '_blank');
-      try {
-        const blob = await fetchBlob(item.url);
-        const objectUrl = URL.createObjectURL(blob);
-        state.objectUrls.push(objectUrl);
-        if (target) target.location = objectUrl;
-      } catch (error) {
-        if (target) target.close();
-        throw error;
-      }
+    async function copySelectedUrls() {
+      const items = selectedAssets();
+      if (!items.length) return;
+      await navigator.clipboard.writeText(items.map((item) => item.url).join('\n'));
+      toast(`Copied ${items.length} link(s)`);
     }
 
-    function getSendPayload(assetId) {
+    function getSendPayload(assetIds) {
       const { conversation } = getConversationContext();
-      if (!conversation?.id || !conversation?.account_id) {
+      const accountId = resolveAccountId();
+      if (!conversation?.id || !accountId) {
         throw new Error('افتح التطبيق من داخل محادثة Chatwoot الأول');
       }
       return {
-        assetId,
-        accountId: conversation.account_id,
+        assetIds,
+        accountId,
         conversationId: conversation.id,
         canReply: conversation.can_reply
       };
     }
 
-    async function sendAsset(assetId, mode) {
-      const payload = getSendPayload(assetId);
+    async function sendAssets(assetIds, mode) {
+      const ids = Array.isArray(assetIds) ? assetIds : [assetIds];
+      if (!ids.length) return;
+      const payload = getSendPayload(ids);
       const endpoint = mode === 'attachment' ? '/api/chatwoot/send-attachment' : '/api/chatwoot/send-link';
-      const label = mode === 'attachment' ? 'الملف' : 'الرابط';
-      if (!confirm(`تأكيد إرسال ${label} للعميل في نفس المحادثة؟`)) return;
+      const label = mode === 'attachment' ? 'file(s)' : 'link(s)';
+      if (!confirm('Send ' + ids.length + ' ' + label + ' to the current Chatwoot conversation?')) return;
 
-      log(`Sending ${mode} to Chatwoot conversation ${payload.conversationId}...`);
+      log('Sending ' + ids.length + ' ' + mode + ' item(s) to Chatwoot conversation ' + payload.conversationId + '...');
       const data = await api(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      log(`Sent ${mode}. Message ID: ${data.messageId || '-'}`);
+      log('Sent ' + (data.count || ids.length) + ' ' + mode + ' item(s). Message ID: ' + (data.messageId || '-'));
       toast('تم الإرسال في الشات');
       requestChatwootContext();
     }
@@ -1201,6 +1311,21 @@
     $('#uploadBtn').addEventListener('click', uploadFiles);
     $('#refreshBtn').addEventListener('click', refreshAll);
     $('#pinBtn').addEventListener('click', () => $('#pinDialog').showModal());
+    $('#selectAllBtn').addEventListener('click', toggleSelectAll);
+    $('#clearSelectionBtn').addEventListener('click', clearSelection);
+    $('#bulkCopyBtn').addEventListener('click', copySelectedUrls);
+    $('#bulkSendLinksBtn').addEventListener('click', () => {
+      sendAssets(selectedAssets().map((item) => item.id), 'link').catch((error) => {
+        log(`SEND LINKS ERROR: ${error.message}`);
+        toast(error.message);
+      });
+    });
+    $('#bulkSendFilesBtn').addEventListener('click', () => {
+      sendAssets(selectedAssets().map((item) => item.id), 'attachment').catch((error) => {
+        log(`SEND FILES ERROR: ${error.message}`);
+        toast(error.message);
+      });
+    });
     $('#themeBtn').addEventListener('click', () => {
       setTheme(currentTheme() === 'dark' ? 'light' : 'dark');
     });
@@ -1234,27 +1359,29 @@
       const button = event.target.closest('[data-type]');
       if (!button) return;
       state.type = button.dataset.type;
-      document.querySelectorAll('.tab').forEach((tab) => tab.classList.toggle('active', tab === button));
+      document.querySelectorAll('#filters [data-type]').forEach((tab) => tab.classList.toggle('active', tab === button));
       loadAssets();
     });
 
     grid.addEventListener('click', (event) => {
+      const selectInput = event.target.closest('[data-select]');
       const copyButton = event.target.closest('[data-copy]');
       const deleteButton = event.target.closest('[data-delete]');
       const sendLinkButton = event.target.closest('[data-send-link]');
       const sendFileButton = event.target.closest('[data-send-file]');
-      const openPrivateButton = event.target.closest('[data-open-private]');
+      if (selectInput) {
+        if (selectInput.checked) state.selectedAssetIds.add(selectInput.dataset.select);
+        else state.selectedAssetIds.delete(selectInput.dataset.select);
+        render();
+        return;
+      }
       if (copyButton) copyUrl(copyButton.dataset.copy);
       if (deleteButton) deleteAsset(deleteButton.dataset.delete);
-      if (openPrivateButton) openPrivateAsset(openPrivateButton.dataset.openPrivate).catch((error) => {
-        log(`OPEN ERROR: ${error.message}`);
-        toast(error.message);
-      });
-      if (sendLinkButton) sendAsset(sendLinkButton.dataset.sendLink, 'link').catch((error) => {
+      if (sendLinkButton) sendAssets([sendLinkButton.dataset.sendLink], 'link').catch((error) => {
         log(`SEND LINK ERROR: ${error.message}`);
         toast(error.message);
       });
-      if (sendFileButton) sendAsset(sendFileButton.dataset.sendFile, 'attachment').catch((error) => {
+      if (sendFileButton) sendAssets([sendFileButton.dataset.sendFile], 'attachment').catch((error) => {
         log(`SEND FILE ERROR: ${error.message}`);
         toast(error.message);
       });

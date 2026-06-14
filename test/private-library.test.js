@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,6 +19,31 @@ async function availablePort() {
       server.close(() => resolve(address.port));
     });
   });
+}
+
+async function startMockChatwoot() {
+  const port = await availablePort();
+  const requests = [];
+  const server = createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      requests.push({
+        method: req.method,
+        url: req.url,
+        headers: req.headers,
+        body: Buffer.concat(chunks).toString('utf8')
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ id: 9000 + requests.length }));
+    });
+  });
+  await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
+  return {
+    baseUrl: `http://127.0.0.1:${port}`,
+    requests,
+    close: () => new Promise((resolve) => server.close(resolve))
+  };
 }
 
 async function waitForServer(baseUrl, child) {
@@ -50,6 +76,7 @@ test('private assets are isolated from shared users and public media URLs', asyn
   const root = await mkdtemp(path.join(os.tmpdir(), 'chatwoot-library-'));
   const port = await availablePort();
   const baseUrl = `http://127.0.0.1:${port}`;
+  const chatwoot = await startMockChatwoot();
   const child = spawn(process.execPath, ['server/index.js'], {
     cwd: path.resolve('.'),
     env: {
@@ -59,13 +86,16 @@ test('private assets are isolated from shared users and public media URLs', asyn
       UPLOAD_DIR: path.join(root, 'uploads'),
       LIBRARY_FILE: path.join(root, 'library.json'),
       PRIVATE_LIBRARY_EMAIL: ownerEmail,
-      PRIVATE_LIBRARY_PIN: privatePin
+      PRIVATE_LIBRARY_PIN: privatePin,
+      CHATWOOT_URL: chatwoot.baseUrl,
+      CHATWOOT_API_TOKEN: 'test-token'
     },
     stdio: 'ignore'
   });
 
   t.after(async () => {
     child.kill();
+    await chatwoot.close();
     await rm(root, { recursive: true, force: true });
   });
 
@@ -102,6 +132,8 @@ test('private assets are isolated from shared users and public media URLs', asyn
   const privateAsset = (await privateUpload.json()).created[0];
   assert.equal(privateAsset.visibility, 'private');
   assert.equal(privateAsset.isPublic, false);
+  assert.match(privateAsset.url, /\/share\//);
+  assert.match(privateAsset.contentUrl, /\/api\/assets\/.+\/content$/);
 
   const sharedList = await fetch(`${baseUrl}/api/assets`);
   assert.equal(sharedList.status, 200);
@@ -140,9 +172,48 @@ test('private assets are isolated from shared users and public media URLs', asyn
   assert.equal(privateContent.status, 200);
   assert.equal(await privateContent.text(), 'private content');
 
+  const sharedPrivateFile = await fetch(privateAsset.url);
+  assert.equal(sharedPrivateFile.status, 200);
+  assert.equal(await sharedPrivateFile.text(), 'private content');
+
   const sharedContent = await fetch(
     `${baseUrl}/media/${encodeURIComponent(sharedAsset.fileName)}`
   );
   assert.equal(sharedContent.status, 200);
   assert.equal(await sharedContent.text(), 'shared content');
+
+  const linkSend = await fetch(`${baseUrl}/api/chatwoot/send-link`, {
+    method: 'POST',
+    headers: privateHeaders(),
+    body: JSON.stringify({
+      assetIds: [sharedAsset.id, privateAsset.id],
+      accountId: 7,
+      conversationId: 55,
+      canReply: true
+    })
+  });
+  assert.equal(linkSend.status, 200);
+  assert.equal((await linkSend.json()).count, 2);
+  const linkRequest = chatwoot.requests.at(-1);
+  assert.equal(linkRequest.url, '/api/v1/accounts/7/conversations/55/messages');
+  const linkBody = JSON.parse(linkRequest.body);
+  assert.equal(linkBody.message_type, 'outgoing');
+  assert.match(linkBody.content, new RegExp(sharedAsset.fileName));
+  assert.match(linkBody.content, new RegExp(privateAsset.id));
+
+  const attachmentSend = await fetch(`${baseUrl}/api/chatwoot/send-attachment`, {
+    method: 'POST',
+    headers: privateHeaders(),
+    body: JSON.stringify({
+      assetIds: [sharedAsset.id, privateAsset.id],
+      accountId: 7,
+      conversationId: 55,
+      canReply: true
+    })
+  });
+  assert.equal(attachmentSend.status, 200);
+  assert.equal((await attachmentSend.json()).count, 2);
+  const attachmentRequest = chatwoot.requests.at(-1);
+  assert.equal(attachmentRequest.url, '/api/v1/accounts/7/conversations/55/messages');
+  assert.equal((attachmentRequest.body.match(/name="attachments\[\]"/g) || []).length, 2);
 });

@@ -161,12 +161,30 @@ function canAccessAsset(req, item) {
     && normalizeEmail(item.ownerEmail) === PRIVATE_LIBRARY_EMAIL;
 }
 
+function privateShareToken(item) {
+  const secret = PRIVATE_LIBRARY_PIN || CHATWOOT_API_TOKEN || LIBRARY_PIN || 'chatwoot-library';
+  return crypto
+    .createHmac('sha256', secret)
+    .update(`${item.id}:${item.fileName}:${item.ownerEmail || ''}`)
+    .digest('hex')
+    .slice(0, 32);
+}
+
+function publicAssetUrl(item, req) {
+  if (!isPrivateAsset(item)) {
+    return `${getBaseUrl(req)}/media/${encodeURIComponent(item.fileName)}`;
+  }
+  return `${getBaseUrl(req)}/share/${encodeURIComponent(item.id)}/${privateShareToken(item)}/${encodeURIComponent(item.fileName)}`;
+}
+
 function assetResponse(item, req) {
   const isPrivate = isPrivateAsset(item);
   return {
     ...item,
     isPublic: !isPrivate,
-    url: isPrivate
+    canShareLink: true,
+    url: publicAssetUrl(item, req),
+    contentUrl: isPrivate
       ? `${getBaseUrl(req)}/api/assets/${encodeURIComponent(item.id)}/content`
       : `${getBaseUrl(req)}/media/${encodeURIComponent(item.fileName)}`
   };
@@ -216,6 +234,35 @@ function assertChatwootConfig(req) {
   }
 
   return { baseUrl, accountId, conversationId };
+}
+
+async function requestedAssets(req) {
+  const ids = Array.isArray(req.body.assetIds)
+    ? req.body.assetIds
+    : [req.body.assetId];
+  const cleanIds = ids.map((id) => String(id || '').trim()).filter(Boolean);
+  if (!cleanIds.length) {
+    const error = new Error('Missing assetId or assetIds');
+    error.status = 400;
+    throw error;
+  }
+
+  const idSet = new Set(cleanIds);
+  const items = await readLibrary();
+  const found = items.filter((item) => idSet.has(item.id));
+  if (found.length !== idSet.size) {
+    const error = new Error('Asset not found');
+    error.status = 404;
+    throw error;
+  }
+  if (found.some((item) => !canAccessAsset(req, item))) {
+    const error = new Error('Asset not found');
+    error.status = 404;
+    throw error;
+  }
+
+  const order = new Map(cleanIds.map((id, index) => [id, index]));
+  return found.sort((a, b) => order.get(a.id) - order.get(b.id));
 }
 
 function parseTags(value) {
@@ -531,18 +578,28 @@ app.get('/api/assets/:id/content', requirePin, async (req, res) => {
   return res.sendFile(path.join(UPLOAD_DIR, asset.fileName));
 });
 
+app.get('/share/:id/:token/:fileName', async (req, res) => {
+  const asset = await findAsset(req.params.id);
+  if (
+    !asset
+    || asset.fileName !== req.params.fileName
+    || !isPrivateAsset(asset)
+    || !safeEqual(req.params.token, privateShareToken(asset))
+  ) {
+    return res.status(404).json({ error: 'Asset not found' });
+  }
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 'public, max-age=604800');
+  return res.sendFile(path.join(UPLOAD_DIR, asset.fileName));
+});
+
 app.post('/api/chatwoot/send-link', requirePin, async (req, res) => {
   const { baseUrl, accountId, conversationId } = assertChatwootConfig(req);
-  const asset = await findAsset(String(req.body.assetId || ''));
-  if (!asset) return res.status(404).json({ error: 'Asset not found' });
-  if (!canAccessAsset(req, asset)) return res.status(404).json({ error: 'Asset not found' });
-  if (isPrivateAsset(asset)) {
-    return res.status(409).json({ error: 'Private files can only be sent as attachments' });
-  }
-
-  const publicUrl = `${getBaseUrl(req)}/media/${encodeURIComponent(asset.fileName)}`;
+  const assets = await requestedAssets(req);
   const message = String(req.body.message || '').trim();
-  const content = message || `${asset.title || asset.originalName}\n${publicUrl}`;
+  const content = message || assets
+    .map((asset) => `${asset.title || asset.originalName}\n${publicAssetUrl(asset, req)}`)
+    .join('\n\n');
 
   const response = await axios.post(
     `${baseUrl}/api/v1/accounts/${accountId}/conversations/${conversationId}/messages`,
@@ -562,27 +619,27 @@ app.post('/api/chatwoot/send-link', requirePin, async (req, res) => {
     }
   );
 
-  res.json({ ok: true, mode: 'link', messageId: response.data?.id || null });
+  res.json({ ok: true, mode: 'link', count: assets.length, messageId: response.data?.id || null });
 });
 
 app.post('/api/chatwoot/send-attachment', requirePin, async (req, res) => {
   const { baseUrl, accountId, conversationId } = assertChatwootConfig(req);
-  const asset = await findAsset(String(req.body.assetId || ''));
-  if (!asset) return res.status(404).json({ error: 'Asset not found' });
-  if (!canAccessAsset(req, asset)) return res.status(404).json({ error: 'Asset not found' });
-
-  const filePath = path.join(UPLOAD_DIR, asset.fileName);
-  await fs.access(filePath);
+  const assets = await requestedAssets(req);
 
   const form = new FormData();
   form.append('message_type', 'outgoing');
   form.append('private', 'false');
   form.append('content', String(req.body.content || '').trim());
-  form.append('attachments[]', createReadStream(filePath), {
-    filename: asset.originalName || asset.fileName,
-    contentType: asset.mimeType || 'application/octet-stream',
-    knownLength: asset.size || undefined
-  });
+
+  for (const asset of assets) {
+    const filePath = path.join(UPLOAD_DIR, asset.fileName);
+    await fs.access(filePath);
+    form.append('attachments[]', createReadStream(filePath), {
+      filename: asset.originalName || asset.fileName,
+      contentType: asset.mimeType || 'application/octet-stream',
+      knownLength: asset.size || undefined
+    });
+  }
 
   const response = await axios.post(
     `${baseUrl}/api/v1/accounts/${accountId}/conversations/${conversationId}/messages`,
@@ -598,7 +655,7 @@ app.post('/api/chatwoot/send-attachment', requirePin, async (req, res) => {
     }
   );
 
-  res.json({ ok: true, mode: 'attachment', messageId: response.data?.id || null });
+  res.json({ ok: true, mode: 'attachment', count: assets.length, messageId: response.data?.id || null });
 });
 
 app.use((error, _req, res, _next) => {
