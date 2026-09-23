@@ -520,6 +520,131 @@
       flex-wrap: wrap;
     }
 
+    .packages-panel {
+      padding: 14px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .packages-panel[hidden] {
+      display: none;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .section-head h3 {
+      margin: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 16px;
+    }
+
+    .package-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 12px;
+    }
+
+    .package-card {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .package-card.active {
+      border-color: var(--brand);
+      box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.12);
+    }
+
+    .package-name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 800;
+      color: var(--text-strong);
+      min-width: 0;
+    }
+
+    .package-name span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .package-files {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+
+    .package-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 7px;
+    }
+
+    .package-actions .btn {
+      height: 36px;
+      padding: 0 10px;
+    }
+
+    .chips {
+      display: flex;
+      gap: 5px;
+      flex-wrap: wrap;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      max-width: 100%;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      background: var(--brand-soft);
+      color: var(--brand-text);
+      border: 1px solid var(--brand-line);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .filter-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: var(--brand-soft);
+      border: 1px solid var(--brand-line);
+      color: var(--brand-text);
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .filter-banner[hidden] {
+      display: none;
+    }
+
     .side {
       padding: 14px;
       display: grid;
@@ -613,6 +738,10 @@
       background: var(--surface-muted);
     }
 
+    .empty[hidden] {
+      display: none;
+    }
+
     .toast {
       position: fixed;
       bottom: 18px;
@@ -633,6 +762,8 @@
     }
 
     dialog {
+      background: var(--surface);
+      color: var(--text);
       border: 0;
       border-radius: 8px;
       padding: 0;
@@ -737,7 +868,7 @@
       </section>
 
       <section class="panel toolbar">
-        <input id="searchInput" class="input" placeholder="بحث باسم الملف، tag، أو ملاحظة" />
+        <input id="searchInput" class="input" type="search" placeholder="بحث باسم الملف، tag، ملاحظة أو اسم package (مثال: CFM)" />
         <div class="filters" id="filters">
           <button class="tab" id="selectAllBtn" type="button"><i data-lucide="check-square"></i>Select all</button>
           <button class="tab active" data-type="all" type="button"><i data-lucide="layout-grid"></i>الكل</button>
@@ -748,18 +879,32 @@
         </div>
       </section>
 
+      <section class="panel packages-panel" id="packagesPanel">
+        <div class="section-head">
+          <h3><i data-lucide="package"></i><span id="packagesTitle">Packages</span></h3>
+          <button class="btn ghost" id="newPackageBtn" type="button"><i data-lucide="package-plus"></i><span>New package</span></button>
+        </div>
+        <div class="package-grid" id="packageGrid"></div>
+        <p class="hint" id="packagesEmpty" hidden>مفيش packages لسه. اختار ملفات (أو ابحث مثلاً CFM واعمل Select all) ثم Save as package.</p>
+      </section>
+
       <section class="panel bulk-bar" id="bulkBar" hidden>
         <div class="bulk-status" id="bulkStatus">0 selected</div>
         <div class="bulk-actions">
           <button class="btn" id="bulkCopyBtn" type="button"><i data-lucide="copy"></i><span>Copy links</span></button>
           <button class="btn" id="bulkSendLinksBtn" type="button"><i data-lucide="link"></i><span>Send links</span></button>
           <button class="btn primary" id="bulkSendFilesBtn" type="button"><i data-lucide="send"></i><span>Send files</span></button>
+          <button class="btn" id="bulkPackageBtn" type="button"><i data-lucide="package-plus"></i><span>Save as package</span></button>
           <button class="btn ghost" id="clearSelectionBtn" type="button"><i data-lucide="x"></i><span>Clear</span></button>
         </div>
       </section>
 
       <section class="content">
         <div class="panel library">
+          <div class="filter-banner" id="packageFilterBanner" hidden>
+            <span id="packageFilterLabel"></span>
+            <button class="btn ghost" id="clearPackageFilterBtn" type="button"><i data-lucide="x"></i><span>كل الملفات</span></button>
+          </div>
           <div class="grid" id="assetGrid"></div>
           <div class="empty" id="emptyState" hidden>
             <div>
@@ -809,6 +954,29 @@
     </form>
   </dialog>
 
+  <dialog id="packageDialog">
+    <form method="dialog" class="dialog-body" id="packageForm">
+      <h2 class="dialog-title" id="packageDialogTitle">Save as package</h2>
+      <p class="hint" id="packageDialogHint"></p>
+      <div class="field" id="packageTargetField">
+        <label for="packageTarget">Package</label>
+        <select id="packageTarget" class="select"></select>
+      </div>
+      <div class="field" id="packageNameField">
+        <label for="packageNameInput">اسم الـ package</label>
+        <input id="packageNameInput" class="input" maxlength="120" placeholder="مثال: CFM" />
+      </div>
+      <div class="field" id="packageDescField">
+        <label for="packageDescInput">وصف</label>
+        <textarea id="packageDescInput" class="textarea" maxlength="1000" placeholder="كل ملفات كورس CFM"></textarea>
+      </div>
+      <div class="top-actions">
+        <button class="btn ghost" value="cancel" type="submit">إلغاء</button>
+        <button class="btn primary" id="savePackageBtn" value="default" type="button">حفظ</button>
+      </div>
+    </form>
+  </dialog>
+
   <div class="toast" id="toast"></div>
 
   <script>
@@ -828,7 +996,10 @@
       scope: 'shared',
       appContext: null,
       selectedAssetIds: new Set(),
-      objectUrls: []
+      objectUrls: [],
+      packages: [],
+      packageId: '',
+      packageDialog: null
     };
 
     const $ = (selector) => document.querySelector(selector);
@@ -884,6 +1055,12 @@
         result['x-private-library-pin'] = state.privatePin;
       }
       return result;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      })[char]);
     }
 
     function formatBytes(bytes) {
@@ -1046,18 +1223,58 @@
               <span>${formatBytes(item.size)}</span>
               <span>${new Date(item.createdAt).toLocaleDateString()}</span>
             </div>
+            ${item.packages?.length ? `<div class="chips">${item.packages.map((pkg) => `<span class="chip" title="${escapeHtml(pkg.name)}">${icon('package')}${escapeHtml(pkg.name)}</span>`).join('')}</div>` : ''}
             <div class="asset-actions">
               <button class="btn primary" type="button" data-send-file="${item.id}">${icon('send')}Send file</button>
               <button class="btn" type="button" data-send-link="${item.id}">${icon('link')}Send link</button>
               <button class="btn" type="button" data-copy="${item.url}">${icon('copy')}Copy</button>
               <a class="btn" href="${item.url}" target="_blank" rel="noreferrer">${icon('external-link')}Open</a>
+              ${state.packageId ? `<button class="btn" type="button" data-unpack="${item.id}">${icon('package-minus')}Remove</button>` : ''}
               <button class="btn icon danger" type="button" title="Delete" data-delete="${item.id}">${icon('trash-2')}</button>
             </div>
           </div>
         </article>
       `).join('');
       emptyState.hidden = state.assets.length > 0;
+      const activePackage = state.packages.find((pkg) => pkg.id === state.packageId);
+      $('#packageFilterBanner').hidden = !state.packageId;
+      $('#packageFilterLabel').textContent = state.packageId
+        ? `ملفات package: ${activePackage?.name || ''} (${state.assets.length})`
+        : '';
       updateBulkUi();
+      refreshIcons();
+    }
+
+    function renderPackages() {
+      const packages = state.packages;
+      $('#packagesTitle').textContent = state.q.trim()
+        ? `Packages (${packages.length} نتيجة لـ "${state.q.trim()}")`
+        : `Packages (${packages.length})`;
+      $('#packagesEmpty').hidden = packages.length > 0;
+      if (state.q.trim() && !packages.length) {
+        $('#packagesEmpty').textContent = 'مفيش package بالاسم ده. اعمل Select all للنتايج تحت واضغط Save as package.';
+      } else {
+        $('#packagesEmpty').textContent = 'مفيش packages لسه. اختار ملفات (أو ابحث مثلاً CFM واعمل Select all) ثم Save as package.';
+      }
+      $('#packageGrid').innerHTML = packages.map((pkg) => `
+        <article class="package-card ${pkg.id === state.packageId ? 'active' : ''}">
+          <div class="package-name" title="${escapeHtml(pkg.name)}">${icon('package')}<span>${escapeHtml(pkg.name)}</span></div>
+          <div class="meta">
+            <span>${pkg.count} ملف</span>
+            <span>${formatBytes(pkg.totalBytes)}</span>
+          </div>
+          ${pkg.description ? `<div class="package-files">${escapeHtml(pkg.description)}</div>` : ''}
+          <div class="package-files" dir="auto">${pkg.assets.map((item) => escapeHtml(item.title || item.originalName)).join(' • ') || 'فاضية'}</div>
+          <div class="package-actions">
+            <button class="btn primary" type="button" data-pkg-send-files="${pkg.id}" ${pkg.count ? '' : 'disabled'}>${icon('send')}Send files</button>
+            <button class="btn" type="button" data-pkg-send-links="${pkg.id}" ${pkg.count ? '' : 'disabled'}>${icon('link')}Send links</button>
+            <button class="btn" type="button" data-pkg-copy="${pkg.id}" ${pkg.count ? '' : 'disabled'}>${icon('copy')}Copy links</button>
+            <button class="btn" type="button" data-pkg-view="${pkg.id}">${icon('eye')}${pkg.id === state.packageId ? 'Hide' : 'View files'}</button>
+            <button class="btn ghost" type="button" data-pkg-edit="${pkg.id}">${icon('pencil')}Rename</button>
+            <button class="btn danger" type="button" data-pkg-delete="${pkg.id}">${icon('trash-2')}Delete</button>
+          </div>
+        </article>
+      `).join('');
       refreshIcons();
     }
 
@@ -1136,9 +1353,157 @@
 
     async function loadAssets() {
       const params = new URLSearchParams({ type: state.type, q: state.q });
+      if (state.packageId) params.set('packageId', state.packageId);
       const data = await api(`/api/assets?${params}`);
       state.assets = await preparePrivatePreviews(data.items);
       render();
+    }
+
+    async function loadPackages() {
+      const params = new URLSearchParams({ q: state.q });
+      const data = await api(`/api/packages?${params}`);
+      state.packages = data.packages;
+      if (state.packageId && !state.packages.some((pkg) => pkg.id === state.packageId)) {
+        // Keep the filter when the active package is only hidden by the search query.
+        const all = await api('/api/packages');
+        if (!all.packages.some((pkg) => pkg.id === state.packageId)) state.packageId = '';
+      }
+      renderPackages();
+    }
+
+    async function search() {
+      try {
+        await Promise.all([loadAssets(), loadPackages()]);
+      } catch (error) {
+        log(`ERROR: ${error.message}`);
+      }
+    }
+
+    function findPackage(id) {
+      return state.packages.find((pkg) => pkg.id === id);
+    }
+
+    async function openPackageDialog({ mode, packageId = '' }) {
+      state.packageDialog = { mode, packageId };
+      const pkg = packageId ? findPackage(packageId) : null;
+      const count = state.selectedAssetIds.size;
+      $('#packageDialogTitle').textContent = mode === 'rename' ? 'Edit package' : mode === 'new' ? 'New package' : 'Save as package';
+      $('#packageDialogHint').textContent = mode === 'save'
+        ? `${count} ملف متحدد. احفظهم في package جديدة أو ضيفهم على package موجودة.`
+        : mode === 'new' && count
+          ? `هيتضاف ${count} ملف متحدد للـ package.`
+          : mode === 'new' ? 'تقدر تضيف ملفات بعدين: اختارها واضغط Save as package.' : '';
+      $('#packageTargetField').hidden = mode !== 'save';
+      if (mode === 'save') {
+        try {
+          const all = await api('/api/packages');
+          $('#packageTarget').innerHTML = '<option value="">+ Package جديدة</option>'
+            + all.packages.map((item) => `<option value="${item.id}">${escapeHtml(item.name)} (${item.count})</option>`).join('');
+        } catch (error) {
+          log(`PACKAGES ERROR: ${error.message}`);
+          $('#packageTarget').innerHTML = '<option value="">+ Package جديدة</option>';
+        }
+        $('#packageTarget').value = '';
+      }
+      $('#packageNameInput').value = pkg?.name || (mode === 'rename' ? '' : state.q.trim());
+      $('#packageDescInput').value = pkg?.description || '';
+      updatePackageDialogFields();
+      $('#packageDialog').showModal();
+      $('#packageNameInput').focus();
+    }
+
+    function updatePackageDialogFields() {
+      const addToExisting = state.packageDialog?.mode === 'save' && $('#packageTarget').value;
+      $('#packageNameField').hidden = Boolean(addToExisting);
+      $('#packageDescField').hidden = Boolean(addToExisting);
+    }
+
+    async function savePackage() {
+      const { mode, packageId } = state.packageDialog || {};
+      const assetIds = Array.from(state.selectedAssetIds);
+      const target = mode === 'save' ? $('#packageTarget').value : '';
+      const name = $('#packageNameInput').value.trim();
+      const description = $('#packageDescInput').value.trim();
+      const jsonHeaders = { 'Content-Type': 'application/json' };
+
+      try {
+        let data;
+        if (mode === 'rename') {
+          if (!name) throw new Error('اكتب اسم الـ package');
+          data = await api(`/api/packages/${packageId}`, {
+            method: 'PATCH', headers: jsonHeaders, body: JSON.stringify({ name, description })
+          });
+          toast('تم تعديل الـ package');
+        } else if (target) {
+          data = await api(`/api/packages/${target}`, {
+            method: 'PATCH', headers: jsonHeaders, body: JSON.stringify({ addAssetIds: assetIds })
+          });
+          toast(`تمت إضافة ${assetIds.length} ملف لـ ${data.package.name}`);
+        } else {
+          if (!name) throw new Error('اكتب اسم الـ package');
+          data = await api('/api/packages', {
+            method: 'POST', headers: jsonHeaders, body: JSON.stringify({ name, description, assetIds })
+          });
+          toast(`تم إنشاء package ${data.package.name} (${data.package.count} ملف)`);
+        }
+        log(`Package saved: ${data.package.name} (${data.package.count} file(s))`);
+        $('#packageDialog').close();
+        if (mode !== 'rename') state.selectedAssetIds.clear();
+        await search();
+      } catch (error) {
+        log(`PACKAGE ERROR: ${error.message}`);
+        toast(error.message);
+      }
+    }
+
+    async function deletePackage(id) {
+      const pkg = findPackage(id);
+      if (!confirm(`حذف package "${pkg?.name || ''}"؟ الملفات نفسها مش هتتمسح.`)) return;
+      try {
+        await api(`/api/packages/${id}`, { method: 'DELETE' });
+        if (state.packageId === id) state.packageId = '';
+        log(`Deleted package ${pkg?.name || id}`);
+        await search();
+      } catch (error) {
+        log(`DELETE PACKAGE ERROR: ${error.message}`);
+        toast(error.message);
+      }
+    }
+
+    async function removeFromPackage(assetId) {
+      try {
+        await api(`/api/packages/${state.packageId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ removeAssetIds: [assetId] })
+        });
+        toast('اتشال من الـ package');
+        await search();
+      } catch (error) {
+        log(`PACKAGE ERROR: ${error.message}`);
+        toast(error.message);
+      }
+    }
+
+    async function sendPackage(id, mode) {
+      const pkg = findPackage(id);
+      if (!pkg) return;
+      const payload = getSendPayload([]);
+      delete payload.assetIds;
+      payload.packageId = id;
+      const endpoint = mode === 'attachment' ? '/api/chatwoot/send-attachment' : '/api/chatwoot/send-link';
+      const label = mode === 'attachment' ? 'file(s)' : 'link(s)';
+      if (!confirm(`Send package "${pkg.name}" (${pkg.count} ${label}) to the current Chatwoot conversation?`)) return;
+
+      log(`Sending package ${pkg.name} as ${mode} to conversation ${payload.conversationId}...`);
+      const data = await api(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      log(`Sent package ${pkg.name}: ${data.count} item(s). Message ID: ${data.messageId || '-'}`);
+      toast('تم إرسال الـ package في الشات');
+      requestChatwootContext();
     }
 
     async function loadStats() {
@@ -1150,7 +1515,7 @@
 
     async function refreshAll() {
       try {
-        await Promise.all([loadAssets(), loadStats()]);
+        await Promise.all([loadAssets(), loadPackages(), loadStats()]);
       } catch (error) {
         log(`ERROR: ${error.message}`);
       }
@@ -1172,6 +1537,7 @@
         }
       }
       state.scope = scope;
+      state.packageId = '';
       state.selectedAssetIds.clear();
       updateScopeUi();
       await refreshAll();
@@ -1326,6 +1692,48 @@
         toast(error.message);
       });
     });
+    $('#bulkPackageBtn').addEventListener('click', () => openPackageDialog({ mode: 'save' }));
+    $('#newPackageBtn').addEventListener('click', () => openPackageDialog({ mode: 'new' }));
+    $('#packageTarget').addEventListener('change', updatePackageDialogFields);
+    $('#savePackageBtn').addEventListener('click', savePackage);
+    $('#packageForm').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && event.target.id === 'packageNameInput') {
+        event.preventDefault();
+        savePackage();
+      }
+    });
+    $('#clearPackageFilterBtn').addEventListener('click', async () => {
+      state.packageId = '';
+      renderPackages();
+      await loadAssets().catch((error) => log(`ERROR: ${error.message}`));
+    });
+
+    $('#packageGrid').addEventListener('click', async (event) => {
+      const button = event.target.closest('button');
+      if (!button || button.disabled) return;
+      const { pkgSendFiles, pkgSendLinks, pkgCopy, pkgView, pkgEdit, pkgDelete } = button.dataset;
+      try {
+        if (pkgSendFiles) await sendPackage(pkgSendFiles, 'attachment');
+        if (pkgSendLinks) await sendPackage(pkgSendLinks, 'link');
+        if (pkgCopy) {
+          const pkg = findPackage(pkgCopy);
+          await navigator.clipboard.writeText(pkg.assets.map((item) => item.url).join('\n'));
+          toast(`Copied ${pkg.assets.length} link(s)`);
+        }
+        if (pkgView) {
+          state.packageId = state.packageId === pkgView ? '' : pkgView;
+          state.selectedAssetIds.clear();
+          renderPackages();
+          await loadAssets();
+        }
+        if (pkgEdit) await openPackageDialog({ mode: 'rename', packageId: pkgEdit });
+        if (pkgDelete) await deletePackage(pkgDelete);
+      } catch (error) {
+        log(`PACKAGE ERROR: ${error.message}`);
+        toast(error.message);
+      }
+    });
+
     $('#themeBtn').addEventListener('click', () => {
       setTheme(currentTheme() === 'dark' ? 'light' : 'dark');
     });
@@ -1352,7 +1760,7 @@
     $('#searchInput').addEventListener('input', (event) => {
       state.q = event.target.value;
       clearTimeout(window.searchTimer);
-      window.searchTimer = setTimeout(loadAssets, 250);
+      window.searchTimer = setTimeout(search, 250);
     });
 
     $('#filters').addEventListener('click', (event) => {
@@ -1369,6 +1777,8 @@
       const deleteButton = event.target.closest('[data-delete]');
       const sendLinkButton = event.target.closest('[data-send-link]');
       const sendFileButton = event.target.closest('[data-send-file]');
+      const unpackButton = event.target.closest('[data-unpack]');
+      if (unpackButton) removeFromPackage(unpackButton.dataset.unpack);
       if (selectInput) {
         if (selectInput.checked) state.selectedAssetIds.add(selectInput.dataset.select);
         else state.selectedAssetIds.delete(selectInput.dataset.select);

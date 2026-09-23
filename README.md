@@ -7,7 +7,8 @@ Standalone media library for Chatwoot teams. It lets agents upload images, video
 - Multiple file upload.
 - Drag and drop upload area.
 - Grid preview for images, video, audio, and files.
-- Search by file name, tags, and notes.
+- Smart search by file name, title, tags, notes, and package name: case-insensitive, multi-word (`cfm part1`), ignores separators (`CFM-1`, `C.F.M`), and normalizes Arabic letter variants (`إدارة` = `اداره`).
+- Packages: group related files (for example every `CFM` course file) and send the whole package to the customer at once, as attachments or as links.
 - Filter by type: images, video, audio, files.
 - Copy direct public URL.
 - Open and download files from `/media/...`.
@@ -49,6 +50,7 @@ JSON_UPLOAD_MAX_MB=15
 LIBRARY_PIN=change-this-pin
 UPLOAD_DIR=/app/storage/uploads
 LIBRARY_FILE=/app/storage/library.json
+PACKAGES_FILE=/app/storage/packages.json
 CHATWOOT_URL=https://chat.yourdomain.com
 CHATWOOT_ACCOUNT_ID=2
 CHATWOOT_API_TOKEN=your-chatwoot-agent-token
@@ -77,6 +79,40 @@ Private files:
 - Can be sent to Chatwoot as attachments.
 
 `PRIVATE_LIBRARY_EMAIL` can be changed later if ownership moves to a different agent.
+
+## Packages
+
+A package is a named group of library files, e.g. `CFM` holding every CFM course file.
+
+Typical flow:
+
+1. Search `CFM`.
+2. Click `Select all`.
+3. Click `Save as package`. The name is pre-filled from the search; you can also add the selection to an existing package.
+4. From the package card: `Send files` (one Chatwoot message with all attachments), `Send links` (one text message titled with the package name), `Copy links`, `View files`, `Rename`, `Delete`.
+
+Notes:
+
+- Packages exist in both the shared library and Ahmed's private library, and follow the same access rules.
+- Shared packages can only contain shared files, so a private file never reaches other agents.
+- Private packages can mix private and shared files.
+- Deleting a package does not delete its files. Deleting a file removes it from every package.
+- Package metadata is stored in `PACKAGES_FILE` (defaults to `packages.json` next to `LIBRARY_FILE`), so it lives on the same persistent volume.
+
+API:
+
+```text
+GET    /api/packages?q=cfm
+GET    /api/packages/:id
+POST   /api/packages            { name, description?, tags?, assetIds }
+PATCH  /api/packages/:id        { name?, description?, tags?, assetIds?, addAssetIds?, removeAssetIds? }
+DELETE /api/packages/:id
+GET    /api/assets?packageId=:id
+POST   /api/chatwoot/send-attachment  { packageId, accountId, conversationId }
+POST   /api/chatwoot/send-link        { packageId, accountId, conversationId }
+```
+
+Send `x-library-scope: private` plus the private-library headers to work with Ahmed's private packages.
 
 ## Persistent Storage
 
