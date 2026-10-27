@@ -5,9 +5,12 @@ Standalone media library for Chatwoot teams. It lets agents upload images, video
 ## Features
 
 - Multiple file upload.
+- Folder upload (up to 200 files): preserves relative paths and creates or updates a matching package so the entire folder can be sent from its card.
 - Drag and drop upload area.
 - Grid preview for images, video, audio, and files.
 - Smart search by file name, title, tags, notes, and package name: case-insensitive, multi-word (`cfm part1`), ignores separators (`CFM-1`, `C.F.M`), and normalizes Arabic letter variants (`إدارة` = `اداره`).
+- Search also matches paths inside uploaded folders and files contained in packages. Open a folder with **View files**, then search to narrow its contents.
+- Asset results load 60 at a time; use **Load more** for the next page.
 - Packages: group related files (for example every `CFM` course file) and send the whole package to the customer at once, as attachments or as links.
 - Filter by type: images, video, audio, files.
 - Copy direct public URL.
@@ -69,6 +72,7 @@ ahmed.farouk@engosoft.com
 ```
 
 Set `PRIVATE_LIBRARY_PIN` to enable it. The email controls who sees the private-library tab, while the separate PIN protects every private API request on the server.
+When Chatwoot sends Ahmed's `currentAgent` context, the app opens his private library automatically if the PIN is already in the browser session. Otherwise it prompts him for the private PIN. `PRIVATE_LIBRARY_PIN` must be configured on the server for this to work.
 
 Private files:
 
@@ -98,6 +102,7 @@ Notes:
 - Private packages can mix private and shared files.
 - Deleting a package does not delete its files. Deleting a file removes it from every package.
 - Package metadata is stored in `PACKAGES_FILE` (defaults to `packages.json` next to `LIBRARY_FILE`), so it lives on the same persistent volume.
+- Uploaded folders are packages; nested paths remain on each file as `folderPath`. Uploading another folder with the same name adds its files to that package. A package is limited to 200 files.
 
 API:
 
@@ -123,6 +128,7 @@ If you deploy on Coolify, add a persistent volume for:
 ```
 
 Without a persistent volume, files may be lost after redeploys or container rebuilds.
+Use one app instance with the JSON store. Writes are serialized within the process and saved atomically, but separate replicas do not coordinate writes. Use a database and object storage before running multiple replicas or handling a very large library.
 
 ## Chatwoot Dashboard App
 

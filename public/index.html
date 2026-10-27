@@ -592,6 +592,13 @@
       -webkit-box-orient: vertical;
     }
 
+    .upload-choices { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+    .upload-selection { color: var(--muted); font-size: 13px; margin: 0; }
+    .load-more { display: block; margin: 18px auto 4px; }
+    .load-more[hidden] { display: none; }
+    .folder-path { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .asset-summary { color: var(--muted); font-size: 13px; margin: 2px 0 14px; }
+
     .package-actions {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -834,18 +841,23 @@
 
     <main class="shell">
       <section class="scope-switch" id="libraryScopes" hidden>
-        <span class="scope-label">Library:</span>
-        <button class="tab active" data-scope="shared" type="button"><i data-lucide="users"></i>Shared</button>
-        <button class="tab" data-scope="private" type="button"><i data-lucide="lock-keyhole"></i>Ahmed Private</button>
+        <span class="scope-label">اللايبريري:</span>
+        <button class="tab active" data-scope="shared" type="button"><i data-lucide="users"></i>المشتركة</button>
+        <button class="tab" data-scope="private" type="button"><i data-lucide="lock-keyhole"></i>الخاصة بأحمد</button>
       </section>
 
       <section class="panel upload-panel">
         <div class="dropzone" id="dropzone">
           <input id="fileInput" type="file" multiple hidden />
+          <input id="folderInput" type="file" webkitdirectory directory multiple hidden />
           <div>
             <div class="dropzone-icon"><i data-lucide="upload-cloud"></i></div>
             <h2>اسحب الملفات هنا أو اختارها من جهازك</h2>
             <p id="uploadHelp">يدعم الصور، الفيديو، الصوت، PDF، Word، Excel، CSV و ZIP.</p>
+            <div class="upload-choices">
+              <button class="btn" id="chooseFilesBtn" type="button"><i data-lucide="files"></i>اختيار ملفات</button>
+              <button class="btn" id="chooseFolderBtn" type="button"><i data-lucide="folder-up"></i>اختيار فولدر</button>
+            </div>
           </div>
         </div>
         <div class="upload-fields">
@@ -858,6 +870,7 @@
             <textarea id="notesInput" class="textarea" placeholder="وصف داخلي بسيط للفريق"></textarea>
           </div>
           <button class="btn primary" id="uploadBtn" type="button"><i data-lucide="upload"></i><span>ابدأ الرفع</span></button>
+          <p class="upload-selection" id="uploadSelection">لم يتم اختيار ملفات بعد</p>
         </div>
       </section>
 
@@ -868,9 +881,9 @@
       </section>
 
       <section class="panel toolbar">
-        <input id="searchInput" class="input" type="search" placeholder="بحث باسم الملف، tag، ملاحظة أو اسم package (مثال: CFM)" />
+        <input id="searchInput" class="input" type="search" aria-label="ابحث في الملفات والفولدرات" placeholder="ابحث في اسم الملف أو مساره داخل الفولدر أو الوصف" />
         <div class="filters" id="filters">
-          <button class="tab" id="selectAllBtn" type="button"><i data-lucide="check-square"></i>Select all</button>
+          <button class="tab" id="selectAllBtn" type="button"><i data-lucide="check-square"></i>تحديد المعروض</button>
           <button class="tab active" data-type="all" type="button"><i data-lucide="layout-grid"></i>الكل</button>
           <button class="tab" data-type="image" type="button"><i data-lucide="image"></i>صور</button>
           <button class="tab" data-type="video" type="button"><i data-lucide="video"></i>فيديو</button>
@@ -881,21 +894,21 @@
 
       <section class="panel packages-panel" id="packagesPanel">
         <div class="section-head">
-          <h3><i data-lucide="package"></i><span id="packagesTitle">Packages</span></h3>
-          <button class="btn ghost" id="newPackageBtn" type="button"><i data-lucide="package-plus"></i><span>New package</span></button>
+          <h3><i data-lucide="package"></i><span id="packagesTitle">الفولدرات والمجموعات</span></h3>
+          <button class="btn ghost" id="newPackageBtn" type="button"><i data-lucide="package-plus"></i><span>مجموعة جديدة</span></button>
         </div>
         <div class="package-grid" id="packageGrid"></div>
-        <p class="hint" id="packagesEmpty" hidden>مفيش packages لسه. اختار ملفات (أو ابحث مثلاً CFM واعمل Select all) ثم Save as package.</p>
+      <p class="hint" id="packagesEmpty" hidden>مفيش مجموعات لسه. اختار ملفات واضغط حفظ كمجموعة، أو ارفع فولدر كامل.</p>
       </section>
 
       <section class="panel bulk-bar" id="bulkBar" hidden>
-        <div class="bulk-status" id="bulkStatus">0 selected</div>
+        <div class="bulk-status" id="bulkStatus">0 ملف محدد</div>
         <div class="bulk-actions">
-          <button class="btn" id="bulkCopyBtn" type="button"><i data-lucide="copy"></i><span>Copy links</span></button>
-          <button class="btn" id="bulkSendLinksBtn" type="button"><i data-lucide="link"></i><span>Send links</span></button>
-          <button class="btn primary" id="bulkSendFilesBtn" type="button"><i data-lucide="send"></i><span>Send files</span></button>
-          <button class="btn" id="bulkPackageBtn" type="button"><i data-lucide="package-plus"></i><span>Save as package</span></button>
-          <button class="btn ghost" id="clearSelectionBtn" type="button"><i data-lucide="x"></i><span>Clear</span></button>
+          <button class="btn" id="bulkCopyBtn" type="button"><i data-lucide="copy"></i><span>نسخ الروابط</span></button>
+          <button class="btn" id="bulkSendLinksBtn" type="button"><i data-lucide="link"></i><span>إرسال الروابط</span></button>
+          <button class="btn primary" id="bulkSendFilesBtn" type="button"><i data-lucide="send"></i><span>إرسال الملفات</span></button>
+          <button class="btn" id="bulkPackageBtn" type="button"><i data-lucide="package-plus"></i><span>حفظ كمجموعة</span></button>
+          <button class="btn ghost" id="clearSelectionBtn" type="button"><i data-lucide="x"></i><span>إلغاء التحديد</span></button>
         </div>
       </section>
 
@@ -905,7 +918,9 @@
             <span id="packageFilterLabel"></span>
             <button class="btn ghost" id="clearPackageFilterBtn" type="button"><i data-lucide="x"></i><span>كل الملفات</span></button>
           </div>
+          <p class="asset-summary" id="assetSummary" aria-live="polite"></p>
           <div class="grid" id="assetGrid"></div>
+          <button class="btn load-more" id="loadMoreBtn" type="button" hidden>تحميل المزيد</button>
           <div class="empty" id="emptyState" hidden>
             <div>
               <i data-lucide="folder-open"></i>
@@ -956,7 +971,7 @@
 
   <dialog id="packageDialog">
     <form method="dialog" class="dialog-body" id="packageForm">
-      <h2 class="dialog-title" id="packageDialogTitle">Save as package</h2>
+      <h2 class="dialog-title" id="packageDialogTitle">حفظ كمجموعة</h2>
       <p class="hint" id="packageDialogHint"></p>
       <div class="field" id="packageTargetField">
         <label for="packageTarget">Package</label>
@@ -985,6 +1000,11 @@
       type: 'all',
       q: '',
       selectedFiles: [],
+      folderName: '',
+      totalAssets: 0,
+      assetRequest: 0,
+      packageRequest: 0,
+      statsRequest: 0,
       config: {
         maxFileMb: 100,
         jsonUploadMaxMb: 15,
@@ -1115,8 +1135,8 @@
     }
 
     function getAgentEmail() {
-      const { currentAgent } = getConversationContext();
-      return String(currentAgent?.email || '').trim().toLowerCase();
+      const { data, currentAgent } = getConversationContext();
+      return String(currentAgent?.email || data.current_user?.email || data.currentUser?.email || '').trim().toLowerCase();
     }
 
     function isPrivateLibraryOwner() {
@@ -1133,6 +1153,12 @@
       refreshIcons();
     }
 
+    function openOwnerLibrary() {
+      if (!isPrivateLibraryOwner() || !state.config.privateLibrary?.configured || state.scope === 'private') return;
+      if (state.privatePin) switchScope('private');
+      else if (!$('#privatePinDialog').open) $('#privatePinDialog').showModal();
+    }
+
     function selectedAssets() {
       return state.assets.filter((item) => state.selectedAssetIds.has(item.id));
     }
@@ -1147,7 +1173,7 @@
     function updateBulkUi() {
       const count = state.selectedAssetIds.size;
       $('#bulkBar').hidden = count === 0;
-      $('#bulkStatus').textContent = `${count} selected`;
+      $('#bulkStatus').textContent = `${count} ملف محدد`;
       $('#selectAllBtn').classList.toggle('active', count > 0 && count === state.assets.length);
       refreshIcons();
     }
@@ -1192,17 +1218,17 @@
     }
 
     function renderPreview(item) {
-      const mediaUrl = item.displayUrl || item.contentUrl || item.url;
+      const mediaUrl = escapeHtml(item.url);
       if (item.type === 'image') {
-        return `<img src="${mediaUrl}" alt="${item.title || item.originalName}" loading="lazy" />`;
+        return `<img src="${mediaUrl}" alt="${escapeHtml(item.title || item.originalName)}" loading="lazy" decoding="async" />`;
       }
       if (item.type === 'video') {
-        return `<video src="${mediaUrl}" muted preload="metadata"></video>`;
+        return `<div class="file-preview">${icon('video')}<span>${escapeHtml(item.originalName)}</span></div>`;
       }
       if (item.type === 'audio') {
-        return `<div class="file-preview">${icon('volume-2')}<span>${item.originalName}</span></div>`;
+        return `<div class="file-preview">${icon('volume-2')}<span>${escapeHtml(item.originalName)}</span></div>`;
       }
-      return `<div class="file-preview">${icon('file-text')}<span>${item.originalName}</span></div>`;
+      return `<div class="file-preview">${icon('file-text')}<span>${escapeHtml(item.originalName)}</span></div>`;
     }
 
     function render() {
@@ -1213,29 +1239,34 @@
             <span class="badge">${typeLabel(item.type)}</span>
             <label class="asset-select">
               <input type="checkbox" data-select="${item.id}" ${state.selectedAssetIds.has(item.id) ? 'checked' : ''} />
-              <span>Select</span>
+              <span>تحديد</span>
             </label>
             ${renderPreview(item)}
           </div>
           <div class="asset-body">
-            <div class="asset-title" title="${item.originalName}">${item.title || item.originalName}</div>
+            <div class="asset-title" title="${escapeHtml(item.originalName)}">${escapeHtml(item.title || item.originalName)}</div>
+            ${item.folderPath ? `<div class="folder-path">${icon('folder')} ${escapeHtml(item.folderPath)}</div>` : ''}
             <div class="meta">
               <span>${formatBytes(item.size)}</span>
               <span>${new Date(item.createdAt).toLocaleDateString()}</span>
             </div>
             ${item.packages?.length ? `<div class="chips">${item.packages.map((pkg) => `<span class="chip" title="${escapeHtml(pkg.name)}">${icon('package')}${escapeHtml(pkg.name)}</span>`).join('')}</div>` : ''}
             <div class="asset-actions">
-              <button class="btn primary" type="button" data-send-file="${item.id}">${icon('send')}Send file</button>
-              <button class="btn" type="button" data-send-link="${item.id}">${icon('link')}Send link</button>
-              <button class="btn" type="button" data-copy="${item.url}">${icon('copy')}Copy</button>
-              <a class="btn" href="${item.url}" target="_blank" rel="noreferrer">${icon('external-link')}Open</a>
-              ${state.packageId ? `<button class="btn" type="button" data-unpack="${item.id}">${icon('package-minus')}Remove</button>` : ''}
-              <button class="btn icon danger" type="button" title="Delete" data-delete="${item.id}">${icon('trash-2')}</button>
+              <button class="btn primary" type="button" data-send-file="${item.id}">${icon('send')}إرسال الملف</button>
+              <button class="btn" type="button" data-send-link="${item.id}">${icon('link')}إرسال الرابط</button>
+              <button class="btn" type="button" data-copy="${escapeHtml(item.url)}">${icon('copy')}نسخ</button>
+              <a class="btn" href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">${icon('external-link')}فتح</a>
+              ${state.packageId ? `<button class="btn" type="button" data-unpack="${item.id}">${icon('package-minus')}إزالة من المجموعة</button>` : ''}
+              <button class="btn icon danger" type="button" title="حذف" aria-label="حذف ${escapeHtml(item.originalName)}" data-delete="${item.id}">${icon('trash-2')}</button>
             </div>
           </div>
         </article>
       `).join('');
       emptyState.hidden = state.assets.length > 0;
+      $('#assetSummary').textContent = state.totalAssets
+        ? `عرض ${state.assets.length} من ${state.totalAssets} ملف` : 'لا توجد ملفات للعرض';
+      $('#loadMoreBtn').hidden = state.assets.length >= state.totalAssets;
+      $('#loadMoreBtn').textContent = `تحميل المزيد (${state.assets.length} من ${state.totalAssets})`;
       const activePackage = state.packages.find((pkg) => pkg.id === state.packageId);
       $('#packageFilterBanner').hidden = !state.packageId;
       $('#packageFilterLabel').textContent = state.packageId
@@ -1248,13 +1279,13 @@
     function renderPackages() {
       const packages = state.packages;
       $('#packagesTitle').textContent = state.q.trim()
-        ? `Packages (${packages.length} نتيجة لـ "${state.q.trim()}")`
-        : `Packages (${packages.length})`;
+        ? `الفولدرات والمجموعات (${packages.length} نتيجة)`
+        : `الفولدرات والمجموعات (${packages.length})`;
       $('#packagesEmpty').hidden = packages.length > 0;
       if (state.q.trim() && !packages.length) {
-        $('#packagesEmpty').textContent = 'مفيش package بالاسم ده. اعمل Select all للنتايج تحت واضغط Save as package.';
+      $('#packagesEmpty').textContent = 'مفيش مجموعة مطابقة. تقدر تحدد الملفات المعروضة وتحفظها كمجموعة.';
       } else {
-        $('#packagesEmpty').textContent = 'مفيش packages لسه. اختار ملفات (أو ابحث مثلاً CFM واعمل Select all) ثم Save as package.';
+        $('#packagesEmpty').textContent = 'مفيش مجموعات لسه. اختار ملفات واضغط حفظ كمجموعة، أو ارفع فولدر كامل.';
       }
       $('#packageGrid').innerHTML = packages.map((pkg) => `
         <article class="package-card ${pkg.id === state.packageId ? 'active' : ''}">
@@ -1264,44 +1295,18 @@
             <span>${formatBytes(pkg.totalBytes)}</span>
           </div>
           ${pkg.description ? `<div class="package-files">${escapeHtml(pkg.description)}</div>` : ''}
-          <div class="package-files" dir="auto">${pkg.assets.map((item) => escapeHtml(item.title || item.originalName)).join(' • ') || 'فاضية'}</div>
+          <div class="package-files" dir="auto">${(pkg.assetNames || []).map(escapeHtml).join(' • ') || 'فاضية'}</div>
           <div class="package-actions">
-            <button class="btn primary" type="button" data-pkg-send-files="${pkg.id}" ${pkg.count ? '' : 'disabled'}>${icon('send')}Send files</button>
-            <button class="btn" type="button" data-pkg-send-links="${pkg.id}" ${pkg.count ? '' : 'disabled'}>${icon('link')}Send links</button>
-            <button class="btn" type="button" data-pkg-copy="${pkg.id}" ${pkg.count ? '' : 'disabled'}>${icon('copy')}Copy links</button>
-            <button class="btn" type="button" data-pkg-view="${pkg.id}">${icon('eye')}${pkg.id === state.packageId ? 'Hide' : 'View files'}</button>
-            <button class="btn ghost" type="button" data-pkg-edit="${pkg.id}">${icon('pencil')}Rename</button>
-            <button class="btn danger" type="button" data-pkg-delete="${pkg.id}">${icon('trash-2')}Delete</button>
+            <button class="btn primary" type="button" data-pkg-send-files="${pkg.id}" ${pkg.count ? '' : 'disabled'}>${icon('send')}إرسال الملفات</button>
+            <button class="btn" type="button" data-pkg-send-links="${pkg.id}" ${pkg.count ? '' : 'disabled'}>${icon('link')}إرسال الروابط</button>
+            <button class="btn" type="button" data-pkg-copy="${pkg.id}" ${pkg.count ? '' : 'disabled'}>${icon('copy')}نسخ الروابط</button>
+            <button class="btn" type="button" data-pkg-view="${pkg.id}">${icon('eye')}${pkg.id === state.packageId ? 'إخفاء' : 'عرض الملفات'}</button>
+            <button class="btn ghost" type="button" data-pkg-edit="${pkg.id}">${icon('pencil')}تعديل</button>
+            <button class="btn danger" type="button" data-pkg-delete="${pkg.id}">${icon('trash-2')}حذف</button>
           </div>
         </article>
       `).join('');
       refreshIcons();
-    }
-
-    function clearObjectUrls() {
-      state.objectUrls.forEach((url) => URL.revokeObjectURL(url));
-      state.objectUrls = [];
-    }
-
-    async function fetchBlob(path) {
-      const response = await fetch(path, { headers: headers() });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || `${response.status} ${response.statusText}`);
-      }
-      return response.blob();
-    }
-
-    async function preparePrivatePreviews(items) {
-      clearObjectUrls();
-      if (state.scope !== 'private') return items;
-      return Promise.all(items.map(async (item) => {
-        if (!['image', 'video'].includes(item.type)) return item;
-        const blob = await fetchBlob(item.contentUrl || item.url);
-        const displayUrl = URL.createObjectURL(blob);
-        state.objectUrls.push(displayUrl);
-        return { ...item, displayUrl };
-      }));
     }
 
     async function api(path, options = {}) {
@@ -1319,12 +1324,12 @@
       }
 
       if (response.status === 401) {
-        $('#pinDialog').showModal();
+        if (!$('#pinDialog').open) $('#pinDialog').showModal();
         throw new Error('PIN required');
       }
 
       if (response.status === 403 && state.scope === 'private') {
-        $('#privatePinDialog').showModal();
+        if (!$('#privatePinDialog').open) $('#privatePinDialog').showModal();
       }
 
       if (!response.ok) {
@@ -1338,7 +1343,9 @@
           detail = detail.replace(/\s+/g, ' ').trim().slice(0, 260);
         }
         const baseMessage = `${response.status} ${response.statusText}`.trim();
-        throw new Error(detail ? `${baseMessage} - ${detail}` : baseMessage || 'Request failed');
+        const error = new Error(detail ? `${baseMessage} - ${detail}` : baseMessage || 'Request failed');
+        error.status = response.status;
+        throw error;
       }
 
       return response.json();
@@ -1347,25 +1354,31 @@
     async function loadConfig() {
       const data = await fetch('/api/config').then((res) => res.json());
       state.config = data;
-      $('#uploadHelp').textContent = `الحد الأقصى للملف ${data.maxFileMb} MB. fallback للملفات الصغيرة حتى ${data.jsonUploadMaxMb} MB. الامتدادات: ${data.allowedExtensions.join(', ')}`;
+      $('#uploadHelp').textContent = `ارفع صور، فيديو، صوت أو مستندات. الحد الأقصى ${data.maxFileMb} MB لكل ملف.`;
       if (data.pinRequired && !state.pin) $('#pinDialog').showModal();
+      openOwnerLibrary();
     }
 
-    async function loadAssets() {
-      const params = new URLSearchParams({ type: state.type, q: state.q });
+    async function loadAssets(append = false) {
+      const request = ++state.assetRequest;
+      const params = new URLSearchParams({ type: state.type, q: state.q, limit: 60, offset: append ? state.assets.length : 0 });
       if (state.packageId) params.set('packageId', state.packageId);
       const data = await api(`/api/assets?${params}`);
-      state.assets = await preparePrivatePreviews(data.items);
+      if (request !== state.assetRequest) return;
+      state.assets = append ? [...state.assets, ...data.items] : data.items;
+      state.totalAssets = data.total;
       render();
     }
 
     async function loadPackages() {
-      const params = new URLSearchParams({ q: state.q });
+      const request = ++state.packageRequest;
+      const params = new URLSearchParams({ q: state.q, summary: '1' });
       const data = await api(`/api/packages?${params}`);
+      if (request !== state.packageRequest) return;
       state.packages = data.packages;
       if (state.packageId && !state.packages.some((pkg) => pkg.id === state.packageId)) {
         // Keep the filter when the active package is only hidden by the search query.
-        const all = await api('/api/packages');
+        const all = await api('/api/packages?summary=1');
         if (!all.packages.some((pkg) => pkg.id === state.packageId)) state.packageId = '';
       }
       renderPackages();
@@ -1376,6 +1389,7 @@
         await Promise.all([loadAssets(), loadPackages()]);
       } catch (error) {
         log(`ERROR: ${error.message}`);
+        toast(error.message);
       }
     }
 
@@ -1387,7 +1401,7 @@
       state.packageDialog = { mode, packageId };
       const pkg = packageId ? findPackage(packageId) : null;
       const count = state.selectedAssetIds.size;
-      $('#packageDialogTitle').textContent = mode === 'rename' ? 'Edit package' : mode === 'new' ? 'New package' : 'Save as package';
+      $('#packageDialogTitle').textContent = mode === 'rename' ? 'تعديل المجموعة' : mode === 'new' ? 'مجموعة جديدة' : 'حفظ كمجموعة';
       $('#packageDialogHint').textContent = mode === 'save'
         ? `${count} ملف متحدد. احفظهم في package جديدة أو ضيفهم على package موجودة.`
         : mode === 'new' && count
@@ -1396,7 +1410,7 @@
       $('#packageTargetField').hidden = mode !== 'save';
       if (mode === 'save') {
         try {
-          const all = await api('/api/packages');
+          const all = await api('/api/packages?summary=1');
           $('#packageTarget').innerHTML = '<option value="">+ Package جديدة</option>'
             + all.packages.map((item) => `<option value="${item.id}">${escapeHtml(item.name)} (${item.count})</option>`).join('');
         } catch (error) {
@@ -1507,7 +1521,9 @@
     }
 
     async function loadStats() {
+      const request = ++state.statsRequest;
       const data = await api('/api/storage');
+      if (request !== state.statsRequest) return;
       $('#countStat').textContent = data.count;
       $('#sizeStat').textContent = formatBytes(data.totalBytes);
       $('#baseStat').textContent = new URL(data.baseUrl).host;
@@ -1543,8 +1559,13 @@
       await refreshAll();
     }
 
-    function setFiles(files) {
+    function setFiles(files, folder = false) {
       state.selectedFiles = Array.from(files || []);
+      state.folderName = folder && state.selectedFiles.length
+        ? (state.selectedFiles[0].webkitRelativePath || '').split('/')[0] : '';
+      $('#uploadSelection').textContent = state.selectedFiles.length
+        ? `${state.selectedFiles.length} ملف جاهز${state.folderName ? ` في فولدر ${state.folderName}` : ''}`
+        : 'لم يتم اختيار ملفات بعد';
       if (state.selectedFiles.length) {
         log(`Selected ${state.selectedFiles.length} file(s)`);
         toast(`${state.selectedFiles.length} ملف جاهز للرفع`);
@@ -1557,20 +1578,35 @@
         return;
       }
 
-      const form = new FormData();
-      for (const file of state.selectedFiles) form.append('files', file);
-      form.append('tags', $('#tagsInput').value);
-      form.append('notes', $('#notesInput').value);
+      if (state.folderName && state.selectedFiles.length > 200) {
+        toast('الحد الأقصى للفولدر 200 ملف');
+        return;
+      }
 
       $('#uploadBtn').disabled = true;
       const totalBytes = state.selectedFiles.reduce((sum, file) => sum + file.size, 0);
       log(`Uploading ${state.selectedFiles.length} file(s), ${formatBytes(totalBytes)}...`);
       try {
-        const data = await uploadWithFallback(form, totalBytes);
-        log(`Uploaded ${data.created.length} file(s)`);
+        let uploaded = 0;
+        for (let start = 0; start < state.selectedFiles.length; start += 50) {
+          const batch = state.selectedFiles.slice(start, start + 50);
+          const form = new FormData();
+          for (const file of batch) form.append('files', file);
+          form.append('filePaths', JSON.stringify(batch.map((file) => file.webkitRelativePath || '')));
+          form.append('folderName', state.folderName);
+          form.append('tags', $('#tagsInput').value);
+          form.append('notes', $('#notesInput').value);
+          const data = await uploadWithFallback(form, batch);
+          uploaded += data.created.length;
+          $('#uploadSelection').textContent = `تم رفع ${uploaded} من ${state.selectedFiles.length}`;
+        }
+        log(`Uploaded ${uploaded} file(s)`);
         toast('تم الرفع بنجاح');
         state.selectedFiles = [];
+        state.folderName = '';
         $('#fileInput').value = '';
+        $('#folderInput').value = '';
+        $('#uploadSelection').textContent = 'لم يتم اختيار ملفات بعد';
         await refreshAll();
       } catch (error) {
         const message = error?.message || String(error) || 'Unknown upload error';
@@ -1581,12 +1617,14 @@
       }
     }
 
-    async function uploadWithFallback(form, totalBytes) {
+    async function uploadWithFallback(form, filesToUpload) {
       try {
         return await api('/api/assets', { method: 'POST', body: form });
       } catch (error) {
         const maxFallbackBytes = Number(state.config.jsonUploadMaxMb || 15) * 1024 * 1024;
-        const canFallback = totalBytes <= maxFallbackBytes;
+        const totalBytes = filesToUpload.reduce((sum, file) => sum + file.size, 0);
+        const canFallback = totalBytes <= maxFallbackBytes && filesToUpload.length <= 10
+          && (!error.status || [502, 503, 504].includes(error.status));
         const message = error?.message || '';
         log(`Multipart upload failed: ${message || 'unknown error'}`);
 
@@ -1594,7 +1632,7 @@
 
         log(`Retrying with fallback upload for files under ${state.config.jsonUploadMaxMb} MB...`);
         const files = [];
-        for (const file of state.selectedFiles) {
+        for (const file of filesToUpload) {
           files.push({
             name: file.name,
             mimeType: file.type || 'application/octet-stream',
@@ -1608,6 +1646,8 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             files,
+            filePaths: filesToUpload.map((file) => file.webkitRelativePath || ''),
+            folderName: state.folderName,
             tags: $('#tagsInput').value,
             notes: $('#notesInput').value
           })
@@ -1640,7 +1680,7 @@
 
     function getSendPayload(assetIds) {
       const { conversation } = getConversationContext();
-      const accountId = resolveAccountId();
+      const accountId = resolveAccountId() || state.config.chatwootAccountId;
       if (!conversation?.id || !accountId) {
         throw new Error('افتح التطبيق من داخل محادثة Chatwoot الأول');
       }
@@ -1671,11 +1711,21 @@
       requestChatwootContext();
     }
 
-    $('#dropzone').addEventListener('click', () => $('#fileInput').click());
+    $('#dropzone').addEventListener('click', (event) => {
+      if (!event.target.closest('button')) $('#fileInput').click();
+    });
+    $('#chooseFilesBtn').addEventListener('click', () => $('#fileInput').click());
+    $('#chooseFolderBtn').addEventListener('click', () => $('#folderInput').click());
     $('#uploadTopBtn').addEventListener('click', () => $('#fileInput').click());
     $('#fileInput').addEventListener('change', (event) => setFiles(event.target.files));
+    $('#folderInput').addEventListener('change', (event) => setFiles(event.target.files, true));
     $('#uploadBtn').addEventListener('click', uploadFiles);
     $('#refreshBtn').addEventListener('click', refreshAll);
+    $('#loadMoreBtn').addEventListener('click', async () => {
+      $('#loadMoreBtn').disabled = true;
+      try { await loadAssets(true); } catch (error) { toast(error.message); }
+      finally { $('#loadMoreBtn').disabled = false; }
+    });
     $('#pinBtn').addEventListener('click', () => $('#pinDialog').showModal());
     $('#selectAllBtn').addEventListener('click', toggleSelectAll);
     $('#clearSelectionBtn').addEventListener('click', clearSelection);
@@ -1716,9 +1766,9 @@
         if (pkgSendFiles) await sendPackage(pkgSendFiles, 'attachment');
         if (pkgSendLinks) await sendPackage(pkgSendLinks, 'link');
         if (pkgCopy) {
-          const pkg = findPackage(pkgCopy);
+          const { package: pkg } = await api(`/api/packages/${pkgCopy}`);
           await navigator.clipboard.writeText(pkg.assets.map((item) => item.url).join('\n'));
-          toast(`Copied ${pkg.assets.length} link(s)`);
+          toast(`تم نسخ ${pkg.assets.length} رابط`);
         }
         if (pkgView) {
           state.packageId = state.packageId === pkgView ? '' : pkgView;
@@ -1810,16 +1860,19 @@
         dropzone.classList.remove('dragover');
       });
     });
-    dropzone.addEventListener('drop', (event) => setFiles(event.dataTransfer.files));
+    dropzone.addEventListener('drop', (event) => {
+      setFiles(event.dataTransfer.files);
+    });
 
     window.addEventListener('message', (event) => {
-      if (!isJSONValid(event.data)) return;
-      const eventData = JSON.parse(event.data);
+      if (event.source !== window.parent) return;
+      const eventData = isJSONValid(event.data) ? JSON.parse(event.data) : event.data;
       if (eventData?.event !== 'appContext') return;
       state.appContext = eventData;
       renderContext();
       updateScopeUi();
       if (state.scope === 'private' && !isPrivateLibraryOwner()) switchScope('shared');
+      else openOwnerLibrary();
       log(`Chatwoot context loaded: conversation ${eventData.data?.conversation?.id || '-'}`);
     });
 

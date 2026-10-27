@@ -112,13 +112,20 @@ async function ensureStorage() {
 }
 
 async function readJsonArray(file) {
-  await ensureStorage();
   const raw = await fs.readFile(file, 'utf8');
+  const parsed = JSON.parse(raw);
+  if (!Array.isArray(parsed)) throw httpError(500, `Invalid storage file: ${path.basename(file)}`);
+  return parsed;
+}
+
+async function writeJsonArray(file, items) {
+  const temporary = `${file}.${crypto.randomUUID()}.tmp`;
   try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
+    await fs.writeFile(temporary, JSON.stringify(items, null, 2), 'utf8');
+    await fs.rename(temporary, file);
+  } catch (error) {
+    await fs.rm(temporary, { force: true }).catch(() => {});
+    throw error;
   }
 }
 
@@ -127,7 +134,7 @@ async function readLibrary() {
 }
 
 async function writeLibrary(items) {
-  await fs.writeFile(LIBRARY_FILE, JSON.stringify(items, null, 2), 'utf8');
+  await writeJsonArray(LIBRARY_FILE, items);
 }
 
 async function readPackages() {
@@ -135,7 +142,20 @@ async function readPackages() {
 }
 
 async function writePackages(packages) {
-  await fs.writeFile(PACKAGES_FILE, JSON.stringify(packages, null, 2), 'utf8');
+  await writeJsonArray(PACKAGES_FILE, packages);
+}
+
+let mutationQueue = Promise.resolve();
+function serializeMutation(_req, res, next) {
+  let release;
+  const turn = new Promise((resolve) => { release = resolve; });
+  const previous = mutationQueue;
+  mutationQueue = turn;
+  previous.then(() => {
+    if (res.destroyed) return release();
+    res.once('close', release);
+    next();
+  });
 }
 
 async function removeAssetsFromPackages(assetIds) {
@@ -234,9 +254,8 @@ function canAccessAsset(req, item) {
 }
 
 function privateShareToken(item) {
-  const secret = PRIVATE_LIBRARY_PIN || CHATWOOT_API_TOKEN || LIBRARY_PIN || 'chatwoot-library';
   return crypto
-    .createHmac('sha256', secret)
+    .createHmac('sha256', PRIVATE_LIBRARY_PIN)
     .update(`${item.id}:${item.fileName}:${item.ownerEmail || ''}`)
     .digest('hex')
     .slice(0, 32);
@@ -263,13 +282,7 @@ function assetResponse(item, req) {
 }
 
 function chatwootBaseUrl(req) {
-  const url = String(req.body.chatwootUrl || CHATWOOT_URL || '').replace(/\/$/, '');
-  if (!url) {
-    const referer = req.headers.referer || '';
-    const match = String(referer).match(/^https?:\/\/[^/]+/);
-    return match ? match[0] : '';
-  }
-  return url;
+  return CHATWOOT_URL;
 }
 
 function resolveAccountId(req) {
@@ -337,7 +350,7 @@ async function findAccessiblePackage(req, id) {
   return pkg;
 }
 
-function packageResponse(pkg, assetsById, req) {
+function packageResponse(pkg, assetsById, req, summary = false) {
   const assets = (pkg.assetIds || [])
     .map((id) => assetsById.get(id))
     .filter((item) => item && canAccessAsset(req, item));
@@ -346,7 +359,8 @@ function packageResponse(pkg, assetsById, req) {
     assetIds: assets.map((item) => item.id),
     count: assets.length,
     totalBytes: assets.reduce((sum, item) => sum + Number(item.size || 0), 0),
-    assets: assets.map((item) => assetResponse(item, req))
+    assetNames: assets.slice(0, 8).map((item) => item.title || item.originalName),
+    ...(summary ? {} : { assets: assets.map((item) => assetResponse(item, req)) })
   };
 }
 
@@ -450,6 +464,7 @@ function createAssetItem(file, extra = {}) {
     size: file.size,
     tags: extra.tags || [],
     notes: extra.notes || '',
+    folderPath: extra.folderPath || '',
     visibility: extra.visibility === 'private' ? 'private' : 'shared',
     ownerEmail: extra.visibility === 'private' ? normalizeEmail(extra.ownerEmail) : null,
     createdAt: now,
@@ -457,10 +472,67 @@ function createAssetItem(file, extra = {}) {
   };
 }
 
+function parseFolderPath(value) {
+  const parts = String(value || '').replace(/\\/g, '/').split('/').filter(Boolean);
+  if (parts.some((part) => part === '.' || part === '..' || part.includes('\0')) || parts.length > 20) {
+    throw httpError(400, 'Invalid folder path');
+  }
+  return parts.join('/').slice(0, 500);
+}
+
+function uploadPaths(raw, count) {
+  if (!raw) return Array(count).fill('');
+  let paths;
+  try { paths = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { throw httpError(400, 'Invalid file paths'); }
+  if (!Array.isArray(paths) || paths.length !== count) throw httpError(400, 'File paths must match uploaded files');
+  return paths.map(parseFolderPath);
+}
+
+async function assertFolderCapacity(req, folderName, incomingCount) {
+  if (!folderName) return;
+  const visibility = requestScope(req);
+  const packages = await readPackages();
+  const existing = packages.find((pkg) => packageInScope(pkg, visibility)
+    && normalizeSearchText(pkg.name) === normalizeSearchText(folderName));
+  if ((existing?.assetIds?.length || 0) + incomingCount > 200) {
+    throw httpError(400, 'A folder can contain up to 200 files');
+  }
+}
+
+async function saveFolderPackage(req, folderName, created) {
+  if (!folderName || !created.length) return null;
+  const name = parsePackageName(folderName);
+  const visibility = requestScope(req);
+  const packages = await readPackages();
+  const existing = packages.find((pkg) => packageInScope(pkg, visibility)
+    && normalizeSearchText(pkg.name) === normalizeSearchText(name));
+  if (existing) {
+    const assetIds = [...new Set([...(existing.assetIds || []), ...created.map((item) => item.id)])];
+    if (assetIds.length > 200) throw httpError(400, 'A folder can contain up to 200 files');
+    existing.assetIds = assetIds;
+    existing.updatedAt = new Date().toISOString();
+    await writePackages(packages);
+    return existing;
+  }
+  if (created.length > 200) throw httpError(400, 'A folder can contain up to 200 files');
+  const now = new Date().toISOString();
+  const pkg = {
+    id: crypto.randomUUID(), name, description: '', tags: [],
+    assetIds: created.map((item) => item.id), visibility,
+    ownerEmail: visibility === 'private' ? PRIVATE_LIBRARY_EMAIL : null,
+    createdAt: now, updatedAt: now
+  };
+  await writePackages([pkg, ...packages]);
+  return pkg;
+}
+
 function parseBase64Payload(value) {
   const input = String(value || '');
   const commaIndex = input.indexOf(',');
-  const base64 = commaIndex >= 0 ? input.slice(commaIndex + 1) : input;
+  const base64 = (commaIndex >= 0 ? input.slice(commaIndex + 1) : input).trim();
+  if (!base64 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64)) {
+    throw httpError(400, 'Invalid base64 file data');
+  }
   return Buffer.from(base64, 'base64');
 }
 
@@ -544,6 +616,7 @@ app.get('/api/config', (_req, res) => {
     maxFileMb: MAX_FILE_MB,
     jsonUploadMaxMb: JSON_UPLOAD_MAX_MB,
     pinRequired: Boolean(LIBRARY_PIN),
+    chatwootAccountId: CHATWOOT_ACCOUNT_ID,
     allowedExtensions: Array.from(allowedExtensions).sort(),
     privateLibrary: {
       email: PRIVATE_LIBRARY_EMAIL,
@@ -559,6 +632,8 @@ app.get('/api/assets', requirePin, requireScopeAccess, async (req, res) => {
   const type = String(req.query.type || 'all');
   const tag = String(req.query.tag || '').trim().toLowerCase();
   const packageId = String(req.query.packageId || '').trim();
+  const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
+  const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 60));
 
   const packagesByAsset = new Map();
   for (const pkg of packages.filter((candidate) => packageInScope(candidate, scope))) {
@@ -580,13 +655,15 @@ app.get('/api/assets', requirePin, requireScopeAccess, async (req, res) => {
       item.originalName,
       item.title,
       item.notes,
+      item.folderPath,
       item.tags || [],
       (packagesByAsset.get(item.id) || []).map((pkg) => pkg.name)
     ]))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
   res.json({
-    items: filtered.map((item) => ({
+    total: filtered.length,
+    items: filtered.slice(offset, offset + limit).map((item) => ({
       ...assetResponse(item, req),
       packages: packagesByAsset.get(item.id) || []
     }))
@@ -607,38 +684,55 @@ app.get('/api/storage', requirePin, requireScopeAccess, async (req, res) => {
   res.json({ totalBytes, count: items.length, byType, baseUrl: getBaseUrl(req) });
 });
 
-app.post('/api/assets', requirePin, requireScopeAccess, uploadAssetFiles, async (req, res) => {
+app.post('/api/assets', requirePin, requireScopeAccess, uploadAssetFiles, serializeMutation, async (req, res) => {
   const files = req.files || [];
   if (!files.length) return res.status(400).json({ error: 'No files were uploaded' });
 
-  const items = await readLibrary();
-  const now = new Date().toISOString();
-  const tags = parseTags(req.body.tags);
-  const notes = String(req.body.notes || '').trim();
-  const visibility = requestScope(req);
+  let previousItems = null;
+  let metadataSaved = false;
+  try {
+    const paths = uploadPaths(req.body.filePaths, files.length);
+    const folderName = req.body.folderName ? parsePackageName(req.body.folderName) : '';
+    await assertFolderCapacity(req, folderName, files.length);
 
-  const created = files.map((file) => createAssetItem({
-    originalName: decodeMulterFilename(file.originalname),
-    fileName: file.filename,
-    mimeType: file.mimetype,
-    size: file.size
-  }, {
-    title: req.body.title,
-    tags,
-    notes,
-    visibility,
-    ownerEmail: visibility === 'private' ? PRIVATE_LIBRARY_EMAIL : null,
-    now
-  }));
+    const items = await readLibrary();
+    previousItems = items;
+    const now = new Date().toISOString();
+    const tags = parseTags(req.body.tags);
+    const notes = String(req.body.notes || '').trim();
+    const visibility = requestScope(req);
 
-  await writeLibrary([...created, ...items]);
-  console.log(`[upload:saved] files=${created.length} libraryCount=${created.length + items.length}`);
-  res.json({
-    created: created.map((item) => assetResponse(item, req))
-  });
+    const created = files.map((file, index) => createAssetItem({
+      originalName: decodeMulterFilename(file.originalname),
+      fileName: file.filename,
+      mimeType: file.mimetype,
+      size: file.size
+    }, {
+      title: req.body.title,
+      tags,
+      notes,
+      folderPath: paths[index],
+      visibility,
+      ownerEmail: visibility === 'private' ? PRIVATE_LIBRARY_EMAIL : null,
+      now
+    }));
+
+    await writeLibrary([...created, ...items]);
+    metadataSaved = true;
+    const folder = await saveFolderPackage(req, folderName, created);
+    console.log(`[upload:saved] files=${created.length} libraryCount=${created.length + items.length}`);
+    res.json({
+      created: created.map((item) => assetResponse(item, req)),
+      folderId: folder?.id || null
+    });
+  } catch (error) {
+    if (metadataSaved) await writeLibrary(previousItems);
+    await Promise.all(files.map((file) => fs.rm(file.path, { force: true }).catch(() => {})));
+    throw error;
+  }
 });
 
-app.post('/api/assets/base64', requirePin, requireScopeAccess, async (req, res) => {
+app.post('/api/assets/base64', requirePin, requireScopeAccess, serializeMutation, async (req, res) => {
   const startedAt = Date.now();
   const files = Array.isArray(req.body.files) ? req.body.files : [];
   if (!files.length) return res.status(400).json({ error: 'No files were uploaded' });
@@ -651,46 +745,63 @@ app.post('/api/assets/base64', requirePin, requireScopeAccess, async (req, res) 
   const notes = String(req.body.notes || '').trim();
   const visibility = requestScope(req);
   const created = [];
+  const folderName = req.body.folderName ? parsePackageName(req.body.folderName) : '';
+  const paths = uploadPaths(req.body.filePaths, files.length);
+  await assertFolderCapacity(req, folderName, files.length);
 
-  for (const file of files) {
+  const prepared = files.map((file) => {
     const originalName = String(file.name || 'media').trim();
     const ext = path.extname(originalName).toLowerCase();
     if (!allowedExtensions.has(ext)) {
-      return res.status(400).json({ error: `Unsupported file type: ${ext || originalName}` });
+      throw httpError(400, `Unsupported file type: ${ext || originalName}`);
     }
 
     const buffer = parseBase64Payload(file.data);
     const maxBytes = JSON_UPLOAD_MAX_MB * 1024 * 1024;
-    if (!buffer.length) return res.status(400).json({ error: `${originalName} is empty` });
+    if (!buffer.length) throw httpError(400, `${originalName} is empty`);
     if (buffer.length > maxBytes) {
-      return res.status(413).json({ error: `${originalName} is too large for fallback upload (${JSON_UPLOAD_MAX_MB} MB max)` });
+      throw httpError(413, `${originalName} is too large for fallback upload (${JSON_UPLOAD_MAX_MB} MB max)`);
+    }
+    return { originalName, buffer, mimeType: String(file.mimeType || 'application/octet-stream') };
+  });
+
+  let metadataSaved = false;
+  try {
+    for (const [index, file] of prepared.entries()) {
+      const fileName = makeStoredFilename(file.originalName);
+      await fs.writeFile(path.join(UPLOAD_DIR, fileName), file.buffer);
+      created.push(createAssetItem({
+        originalName: file.originalName,
+        fileName,
+        mimeType: file.mimeType,
+        size: file.buffer.length
+      }, {
+        title: req.body.title,
+        tags,
+        notes,
+        folderPath: paths[index],
+        visibility,
+        ownerEmail: visibility === 'private' ? PRIVATE_LIBRARY_EMAIL : null,
+        now
+      }));
     }
 
-    const fileName = makeStoredFilename(originalName);
-    await fs.writeFile(path.join(UPLOAD_DIR, fileName), buffer);
-    created.push(createAssetItem({
-      originalName,
-      fileName,
-      mimeType: String(file.mimeType || 'application/octet-stream'),
-      size: buffer.length
-    }, {
-      title: req.body.title,
-      tags,
-      notes,
-      visibility,
-      ownerEmail: visibility === 'private' ? PRIVATE_LIBRARY_EMAIL : null,
-      now
-    }));
+    await writeLibrary([...created, ...items]);
+    metadataSaved = true;
+    const folder = await saveFolderPackage(req, folderName, created);
+    console.log(`[upload:base64:saved] files=${created.length} bytes=${created.reduce((sum, item) => sum + item.size, 0)} ms=${Date.now() - startedAt}`);
+    res.json({
+      created: created.map((item) => assetResponse(item, req)),
+      folderId: folder?.id || null
+    });
+  } catch (error) {
+    if (metadataSaved) await writeLibrary(items);
+    await Promise.all(created.map((item) => fs.rm(path.join(UPLOAD_DIR, item.fileName), { force: true }).catch(() => {})));
+    throw error;
   }
-
-  await writeLibrary([...created, ...items]);
-  console.log(`[upload:base64:saved] files=${created.length} bytes=${created.reduce((sum, item) => sum + item.size, 0)} ms=${Date.now() - startedAt}`);
-  res.json({
-    created: created.map((item) => assetResponse(item, req))
-  });
 });
 
-app.patch('/api/assets/:id', requirePin, async (req, res) => {
+app.patch('/api/assets/:id', requirePin, serializeMutation, async (req, res) => {
   const items = await readLibrary();
   const index = items.findIndex((item) => item.id === req.params.id);
   if (index === -1) return res.status(404).json({ error: 'Asset not found' });
@@ -710,7 +821,7 @@ app.patch('/api/assets/:id', requirePin, async (req, res) => {
   res.json({ item: items[index] });
 });
 
-app.delete('/api/assets/:id', requirePin, async (req, res) => {
+app.delete('/api/assets/:id', requirePin, serializeMutation, async (req, res) => {
   const items = await readLibrary();
   const item = items.find((candidate) => candidate.id === req.params.id);
   if (!item) return res.status(404).json({ error: 'Asset not found' });
@@ -725,7 +836,7 @@ app.delete('/api/assets/:id', requirePin, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete('/api/assets', requirePin, async (req, res) => {
+app.delete('/api/assets', requirePin, serializeMutation, async (req, res) => {
   const ids = Array.isArray(req.body.ids) ? req.body.ids : [];
   const idSet = new Set(ids);
   const items = await readLibrary();
@@ -746,10 +857,17 @@ app.get('/api/packages', requirePin, requireScopeAccess, async (req, res) => {
 
   const filtered = packages
     .filter((pkg) => packageInScope(pkg, scope))
-    .filter((pkg) => matchesSearch(tokens, [pkg.name, pkg.description, pkg.tags || []]))
+    .filter((pkg) => matchesSearch(tokens, [
+      pkg.name, pkg.description, pkg.tags || [],
+      (pkg.assetIds || []).map((id) => {
+        const item = assetsById.get(id);
+        return item && canAccessAsset(req, item)
+          ? [item.originalName, item.title, item.folderPath, item.tags || []] : [];
+      })
+    ]))
     .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
 
-  res.json({ packages: filtered.map((pkg) => packageResponse(pkg, assetsById, req)) });
+  res.json({ packages: filtered.map((pkg) => packageResponse(pkg, assetsById, req, req.query.summary === '1')) });
 });
 
 app.get('/api/packages/:id', requirePin, async (req, res) => {
@@ -758,7 +876,7 @@ app.get('/api/packages/:id', requirePin, async (req, res) => {
   res.json({ package: packageResponse(pkg, new Map(items.map((item) => [item.id, item])), req) });
 });
 
-app.post('/api/packages', requirePin, requireScopeAccess, async (req, res) => {
+app.post('/api/packages', requirePin, requireScopeAccess, serializeMutation, async (req, res) => {
   const visibility = requestScope(req);
   const name = parsePackageName(req.body.name);
   const assetIds = await validatePackageAssetIds(req, req.body.assetIds || [], visibility);
@@ -786,7 +904,7 @@ app.post('/api/packages', requirePin, requireScopeAccess, async (req, res) => {
   res.status(201).json({ package: packageResponse(pkg, new Map(items.map((item) => [item.id, item])), req) });
 });
 
-app.patch('/api/packages/:id', requirePin, async (req, res) => {
+app.patch('/api/packages/:id', requirePin, serializeMutation, async (req, res) => {
   const current = await findAccessiblePackage(req, req.params.id);
   const visibility = isPrivatePackage(current) ? 'private' : 'shared';
   const next = { ...current };
@@ -829,7 +947,7 @@ app.patch('/api/packages/:id', requirePin, async (req, res) => {
   res.json({ package: packageResponse(next, new Map(items.map((item) => [item.id, item])), req) });
 });
 
-app.delete('/api/packages/:id', requirePin, async (req, res) => {
+app.delete('/api/packages/:id', requirePin, serializeMutation, async (req, res) => {
   const pkg = await findAccessiblePackage(req, req.params.id);
   const packages = await readPackages();
   await writePackages(packages.filter((candidate) => candidate.id !== pkg.id));
@@ -847,6 +965,7 @@ app.get('/api/assets/:id/content', requirePin, async (req, res) => {
 });
 
 app.get('/share/:id/:token/:fileName', async (req, res) => {
+  if (!PRIVATE_LIBRARY_PIN) return res.status(404).json({ error: 'Asset not found' });
   const asset = await findAsset(req.params.id);
   if (
     !asset
@@ -868,7 +987,7 @@ app.post('/api/chatwoot/send-link', requirePin, async (req, res) => {
   const links = assets
     .map((asset) => `${asset.title || asset.originalName}\n${publicAssetUrl(asset, req)}`)
     .join('\n\n');
-  const content = message || (pkg ? `${pkg.name}\n\n${links}` : links);
+  const content = [message || pkg?.name, links].filter(Boolean).join('\n\n');
 
   const response = await axios.post(
     `${baseUrl}/api/v1/accounts/${accountId}/conversations/${conversationId}/messages`,
@@ -929,7 +1048,7 @@ app.post('/api/chatwoot/send-attachment', requirePin, async (req, res) => {
 
 app.use((error, _req, res, _next) => {
   console.error(error);
-  res.status(error.status || 400).json({ error: error.message || 'Request failed' });
+  res.status(error.status || 500).json({ error: error.message || 'Request failed' });
 });
 
 await ensureStorage();
