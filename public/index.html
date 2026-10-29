@@ -8,6 +8,9 @@
     const savedTheme = localStorage.getItem('libraryTheme');
     const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     document.documentElement.dataset.theme = savedTheme || (prefersDark ? 'dark' : 'light');
+    const savedLanguage = localStorage.getItem('libraryLanguage') === 'en' ? 'en' : 'ar';
+    document.documentElement.lang = savedLanguage;
+    document.documentElement.dir = savedLanguage === 'en' ? 'ltr' : 'rtl';
   </script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <style>
@@ -832,6 +835,7 @@
         </div>
       </div>
       <div class="top-actions">
+        <button class="btn ghost" id="languageBtn" type="button" aria-label="Switch to English">English</button>
         <button class="btn ghost" id="themeBtn" type="button"><i data-lucide="moon"></i><span>Dark</span></button>
         <button class="btn ghost" id="pinBtn" type="button"><i data-lucide="lock-keyhole"></i><span>PIN</span></button>
         <button class="btn ghost" id="refreshBtn" type="button"><i data-lucide="refresh-cw"></i><span>تحديث</span></button>
@@ -843,7 +847,7 @@
       <section class="scope-switch" id="libraryScopes" hidden>
         <span class="scope-label">اللايبريري:</span>
         <button class="tab active" data-scope="shared" type="button"><i data-lucide="users"></i>المشتركة</button>
-        <button class="tab" data-scope="private" type="button"><i data-lucide="lock-keyhole"></i>الخاصة بأحمد</button>
+        <button class="tab" data-scope="private" type="button"><i data-lucide="lock-keyhole"></i>الخاصة بـ Jackie</button>
       </section>
 
       <section class="panel upload-panel">
@@ -862,7 +866,7 @@
         </div>
         <div class="upload-fields">
           <div class="field">
-            <label for="tagsInput">Tags</label>
+            <label for="tagsInput">وسوم</label>
             <input id="tagsInput" class="input" placeholder="مثال: campaign, pmp, header" />
           </div>
           <div class="field">
@@ -947,7 +951,7 @@
 
   <dialog id="pinDialog">
     <form method="dialog" class="dialog-body">
-      <h2 class="dialog-title">Library PIN</h2>
+      <h2 class="dialog-title">رمز اللايبريري</h2>
       <p class="hint">لو السيرفر متظبط عليه PIN، اكتبه هنا مرة واحدة.</p>
       <input id="pinInput" class="input" type="password" autocomplete="current-password" />
       <div class="top-actions">
@@ -959,12 +963,12 @@
 
   <dialog id="privatePinDialog">
     <form method="dialog" class="dialog-body">
-      <h2 class="dialog-title">Ahmed Private Library</h2>
-      <p class="hint">Enter the private library PIN. It is kept for this browser session only.</p>
+      <h2 class="dialog-title">مكتبة Jackie الخاصة</h2>
+      <p class="hint">اكتب رمز المكتبة الخاصة. سيبقى محفوظًا خلال جلسة المتصفح فقط.</p>
       <input id="privatePinInput" class="input" type="password" autocomplete="current-password" />
       <div class="top-actions">
-        <button class="btn ghost" value="cancel" type="submit">Cancel</button>
-        <button class="btn primary" id="savePrivatePinBtn" value="default" type="button">Open private library</button>
+        <button class="btn ghost" value="cancel" type="submit">إلغاء</button>
+        <button class="btn primary" id="savePrivatePinBtn" value="default" type="button">فتح المكتبة الخاصة</button>
       </div>
     </form>
   </dialog>
@@ -974,7 +978,7 @@
       <h2 class="dialog-title" id="packageDialogTitle">حفظ كمجموعة</h2>
       <p class="hint" id="packageDialogHint"></p>
       <div class="field" id="packageTargetField">
-        <label for="packageTarget">Package</label>
+        <label for="packageTarget">مجموعة</label>
         <select id="packageTarget" class="select"></select>
       </div>
       <div class="field" id="packageNameField">
@@ -1014,6 +1018,7 @@
       pin: localStorage.getItem('libraryPin') || '',
       privatePin: sessionStorage.getItem('privateLibraryPin') || '',
       scope: 'shared',
+      language: savedLanguage,
       appContext: null,
       selectedAssetIds: new Set(),
       objectUrls: [],
@@ -1026,6 +1031,114 @@
     const grid = $('#assetGrid');
     const emptyState = $('#emptyState');
     const logBox = $('#logBox');
+
+    const translations = {
+      'صور، فيديوهات، ملفات وروابط مباشرة': 'Images, videos, files and direct links',
+      'تحديث': 'Refresh', 'رفع ملفات': 'Upload files',
+      'اللايبريري:': 'Library:', 'المشتركة': 'Shared',
+      'الخاصة بـ Jackie': 'Jackie Private',
+      'اسحب الملفات هنا أو اختارها من جهازك': 'Drag files here or choose them from your device',
+      'اختيار ملفات': 'Choose files', 'اختيار فولدر': 'Choose folder',
+      'وسوم': 'Tags', 'ملاحظات': 'Notes', 'ابدأ الرفع': 'Start upload',
+      'عدد الملفات': 'Files', 'المساحة المستخدمة': 'Storage used', 'لينك السيرفر': 'Server URL',
+      'تحديد المعروض': 'Select visible', 'الكل': 'All', 'صور': 'Images',
+      'فيديو': 'Videos', 'صوت': 'Audio', 'ملفات': 'Files',
+      'مجموعة جديدة': 'New collection', 'نسخ الروابط': 'Copy links',
+      'إرسال الروابط': 'Send links', 'إرسال الملفات': 'Send files',
+      'حفظ كمجموعة': 'Save as collection', 'إلغاء التحديد': 'Clear selection',
+      'كل الملفات': 'All files', 'تحميل المزيد': 'Load more',
+      'مفيش ملفات مطابقة للبحث الحالي.': 'No files match the current search.',
+      'المحادثة الحالية': 'Current conversation', 'الحالة': 'Status',
+      'جاري القراءة...': 'Loading...', 'العميل': 'Contact', 'الإرسال': 'Sending',
+      'استخدام الرابط في Chatwoot': 'Using links in Chatwoot',
+      'استخدم Send link لإرسال رابط الملف، أو Send file لإرساله كمرفق حقيقي في نفس المحادثة.':
+        'Use Send link to share a file URL, or Send file to attach it to the current conversation.',
+      'ملاحظات التشغيل': 'Deployment notes',
+      'لو هترفعها على Coolify، اربط مجلد التخزين كـ persistent volume عشان الملفات ما تضيعش مع أي redeploy.':
+        'Use a persistent volume on Coolify so files survive redeployments.',
+      'رمز اللايبريري': 'Library PIN',
+      'مكتبة Jackie الخاصة': 'Jackie Private Library',
+      'اكتب رمز المكتبة الخاصة. سيبقى محفوظًا خلال جلسة المتصفح فقط.':
+        'Enter the private library PIN. It is kept for this browser session only.',
+      'فتح المكتبة الخاصة': 'Open private library',
+      'لو السيرفر متظبط عليه PIN، اكتبه هنا مرة واحدة.':
+        'If the server requires a PIN, enter it here.',
+      'إلغاء': 'Cancel', 'حفظ': 'Save',
+      'Enter the private library PIN. It is kept for this browser session only.':
+        'Enter the private library PIN. It is kept for this browser session only.',
+      'مجموعة': 'Collection', 'اسم الـ package': 'Collection name',
+      'وصف': 'Description',
+      'ابحث في الملفات والفولدرات': 'Search files and folders',
+      'ابحث في اسم الملف أو مساره داخل الفولدر أو الوصف':
+        'Search by file name, folder path or description',
+      'مثال: campaign, pmp, header': 'Example: campaign, pmp, header',
+      'وصف داخلي بسيط للفريق': 'A short internal note for the team',
+      'مثال: CFM': 'Example: CFM',
+      'كل ملفات كورس CFM': 'All CFM course files',
+      'تحديد': 'Select', 'إرسال الملف': 'Send file', 'إرسال الرابط': 'Send link',
+      'نسخ': 'Copy', 'فتح': 'Open', 'إزالة من المجموعة': 'Remove from collection',
+      'حذف': 'Delete', 'إخفاء': 'Hide', 'عرض الملفات': 'View files',
+      'تعديل': 'Edit', 'فاضية': 'Empty',
+      'الفولدرات والمجموعات': 'Folders and collections',
+      'مفيش مجموعات لسه. اختار ملفات واضغط حفظ كمجموعة، أو ارفع فولدر كامل.':
+        'No collections yet. Select files and save them as a collection, or upload a folder.',
+      'مفيش مجموعة مطابقة. تقدر تحدد الملفات المعروضة وتحفظها كمجموعة.':
+        'No matching collection. Select visible files to save a new one.',
+      'Jackie Private Library': 'Jackie Private Library'
+    };
+    const originalText = new WeakMap();
+    const originalAttributes = new WeakMap();
+
+    function tr(ar, en) { return state.language === 'en' ? en : ar; }
+
+    function translateUi() {
+      document.documentElement.lang = state.language;
+      document.documentElement.dir = state.language === 'en' ? 'ltr' : 'rtl';
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (node.parentElement?.closest('.asset-title,.package-name,.package-files,.folder-path,.chip,#contextContact,#logBox,#toast,#packagesTitle,#packagesEmpty,#assetSummary,#loadMoreBtn,#packageFilterLabel,#contextStatus,#contextReply,#packageDialogHint,#packageDialogTitle,#uploadHelp,#uploadSelection,#bulkStatus,#packageTarget')) continue;
+        const original = originalText.get(node) ?? node.textContent;
+        const key = original.trim();
+        if (!(key in translations)) continue;
+        originalText.set(node, original);
+        node.textContent = state.language === 'en'
+          ? original.replace(key, translations[key]) : original;
+      }
+      for (const element of document.querySelectorAll('[placeholder],[aria-label]')) {
+        let originals = originalAttributes.get(element);
+        if (!originals) {
+          originals = { placeholder: element.getAttribute('placeholder'), ariaLabel: element.getAttribute('aria-label') };
+          originalAttributes.set(element, originals);
+        }
+        for (const [attribute, original] of [['placeholder', originals.placeholder], ['aria-label', originals.ariaLabel]]) {
+          if (original && translations[original]) element.setAttribute(attribute, state.language === 'en' ? translations[original] : original);
+        }
+      }
+      $('#languageBtn').textContent = state.language === 'en' ? 'العربية' : 'English';
+      $('#languageBtn').setAttribute('aria-label', state.language === 'en' ? 'التبديل إلى العربية' : 'Switch to English');
+    }
+
+    function setLanguage(language) {
+      state.language = language;
+      localStorage.setItem('libraryLanguage', language);
+      render();
+      renderPackages();
+      renderContext();
+      updateThemeButton();
+      updateUploadSelection();
+      updateUploadHelp();
+      if ($('#packageDialog').open && state.packageDialog) updatePackageDialogCopy();
+      translateUi();
+    }
+
+    function updateUploadHelp() {
+      const max = state.config.maxFileMb;
+      $('#uploadHelp').textContent = tr(
+        `ارفع صور، فيديو، صوت أو مستندات. الحد الأقصى ${max} MB لكل ملف.`,
+        `Upload images, video, audio or documents. Maximum ${max} MB per file.`
+      );
+    }
 
     function icon(name) {
       return `<i data-lucide="${name}"></i>`;
@@ -1042,8 +1155,8 @@
     function updateThemeButton() {
       const isDark = currentTheme() === 'dark';
       const button = $('#themeBtn');
-      button.innerHTML = `${icon(isDark ? 'sun' : 'moon')}<span>${isDark ? 'Light' : 'Dark'}</span>`;
-      button.setAttribute('aria-label', isDark ? 'Switch to light theme' : 'Switch to dark theme');
+      button.innerHTML = `${icon(isDark ? 'sun' : 'moon')}<span>${isDark ? tr('فاتح', 'Light') : tr('داكن', 'Dark')}</span>`;
+      button.setAttribute('aria-label', isDark ? tr('الوضع الفاتح', 'Switch to light theme') : tr('الوضع الداكن', 'Switch to dark theme'));
       refreshIcons();
     }
 
@@ -1173,7 +1286,7 @@
     function updateBulkUi() {
       const count = state.selectedAssetIds.size;
       $('#bulkBar').hidden = count === 0;
-      $('#bulkStatus').textContent = `${count} ملف محدد`;
+      $('#bulkStatus').textContent = tr(`${count} ملف محدد`, `${count} selected`);
       $('#selectAllBtn').classList.toggle('active', count > 0 && count === state.assets.length);
       refreshIcons();
     }
@@ -1198,10 +1311,10 @@
       const canReply = conversation?.can_reply !== false;
       $('#contextStatus').innerHTML = hasConversation
         ? `<span class="pill ${conversation.status === 'open' ? 'ok' : 'warn'}">${conversation.status || 'unknown'} #${conversation.id}</span>`
-        : '<span class="pill warn">مش داخل شات</span>';
+        : `<span class="pill warn">${tr('مش داخل شات', 'No conversation open')}</span>`;
       $('#contextContact').textContent = contact?.name || contact?.phone_number || '-';
       $('#contextReply').innerHTML = hasConversation
-        ? `<span class="pill ${canReply ? 'ok' : 'warn'}">${canReply ? 'مسموح' : 'غير مسموح الآن'}</span>`
+        ? `<span class="pill ${canReply ? 'ok' : 'warn'}">${canReply ? tr('مسموح', 'Allowed') : tr('غير مسموح الآن', 'Unavailable now')}</span>`
         : '-';
     }
 
@@ -1214,7 +1327,7 @@
     }
 
     function typeLabel(type) {
-      return { image: 'صورة', video: 'فيديو', audio: 'صوت', file: 'ملف' }[type] || type;
+      return { image: tr('صورة', 'Image'), video: tr('فيديو', 'Video'), audio: tr('صوت', 'Audio'), file: tr('ملف', 'File') }[type] || type;
     }
 
     function renderPreview(item) {
@@ -1257,45 +1370,47 @@
               <button class="btn" type="button" data-copy="${escapeHtml(item.url)}">${icon('copy')}نسخ</button>
               <a class="btn" href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">${icon('external-link')}فتح</a>
               ${state.packageId ? `<button class="btn" type="button" data-unpack="${item.id}">${icon('package-minus')}إزالة من المجموعة</button>` : ''}
-              <button class="btn icon danger" type="button" title="حذف" aria-label="حذف ${escapeHtml(item.originalName)}" data-delete="${item.id}">${icon('trash-2')}</button>
+              <button class="btn icon danger" type="button" title="${tr('حذف', 'Delete')}" aria-label="${tr('حذف', 'Delete')} ${escapeHtml(item.originalName)}" data-delete="${item.id}">${icon('trash-2')}</button>
             </div>
           </div>
         </article>
       `).join('');
       emptyState.hidden = state.assets.length > 0;
       $('#assetSummary').textContent = state.totalAssets
-        ? `عرض ${state.assets.length} من ${state.totalAssets} ملف` : 'لا توجد ملفات للعرض';
+        ? tr(`عرض ${state.assets.length} من ${state.totalAssets} ملف`, `Showing ${state.assets.length} of ${state.totalAssets} files`)
+        : tr('لا توجد ملفات للعرض', 'No files to show');
       $('#loadMoreBtn').hidden = state.assets.length >= state.totalAssets;
-      $('#loadMoreBtn').textContent = `تحميل المزيد (${state.assets.length} من ${state.totalAssets})`;
+      $('#loadMoreBtn').textContent = tr(`تحميل المزيد (${state.assets.length} من ${state.totalAssets})`, `Load more (${state.assets.length} of ${state.totalAssets})`);
       const activePackage = state.packages.find((pkg) => pkg.id === state.packageId);
       $('#packageFilterBanner').hidden = !state.packageId;
       $('#packageFilterLabel').textContent = state.packageId
-        ? `ملفات package: ${activePackage?.name || ''} (${state.assets.length})`
+        ? tr(`ملفات المجموعة: ${activePackage?.name || ''} (${state.assets.length})`, `Collection files: ${activePackage?.name || ''} (${state.assets.length})`)
         : '';
       updateBulkUi();
       refreshIcons();
+      translateUi();
     }
 
     function renderPackages() {
       const packages = state.packages;
       $('#packagesTitle').textContent = state.q.trim()
-        ? `الفولدرات والمجموعات (${packages.length} نتيجة)`
-        : `الفولدرات والمجموعات (${packages.length})`;
+        ? tr(`الفولدرات والمجموعات (${packages.length} نتيجة)`, `Folders and collections (${packages.length} results)`)
+        : tr(`الفولدرات والمجموعات (${packages.length})`, `Folders and collections (${packages.length})`);
       $('#packagesEmpty').hidden = packages.length > 0;
       if (state.q.trim() && !packages.length) {
-      $('#packagesEmpty').textContent = 'مفيش مجموعة مطابقة. تقدر تحدد الملفات المعروضة وتحفظها كمجموعة.';
+      $('#packagesEmpty').textContent = tr('مفيش مجموعة مطابقة. تقدر تحدد الملفات المعروضة وتحفظها كمجموعة.', 'No matching collection. Select visible files to save a new one.');
       } else {
-        $('#packagesEmpty').textContent = 'مفيش مجموعات لسه. اختار ملفات واضغط حفظ كمجموعة، أو ارفع فولدر كامل.';
+        $('#packagesEmpty').textContent = tr('مفيش مجموعات لسه. اختار ملفات واضغط حفظ كمجموعة، أو ارفع فولدر كامل.', 'No collections yet. Select files and save them as a collection, or upload a folder.');
       }
       $('#packageGrid').innerHTML = packages.map((pkg) => `
         <article class="package-card ${pkg.id === state.packageId ? 'active' : ''}">
           <div class="package-name" title="${escapeHtml(pkg.name)}">${icon('package')}<span>${escapeHtml(pkg.name)}</span></div>
           <div class="meta">
-            <span>${pkg.count} ملف</span>
+            <span>${tr(`${pkg.count} ملف`, `${pkg.count} files`)}</span>
             <span>${formatBytes(pkg.totalBytes)}</span>
           </div>
           ${pkg.description ? `<div class="package-files">${escapeHtml(pkg.description)}</div>` : ''}
-          <div class="package-files" dir="auto">${(pkg.assetNames || []).map(escapeHtml).join(' • ') || 'فاضية'}</div>
+          <div class="package-files" dir="auto">${(pkg.assetNames || []).map(escapeHtml).join(' • ') || tr('فاضية', 'Empty')}</div>
           <div class="package-actions">
             <button class="btn primary" type="button" data-pkg-send-files="${pkg.id}" ${pkg.count ? '' : 'disabled'}>${icon('send')}إرسال الملفات</button>
             <button class="btn" type="button" data-pkg-send-links="${pkg.id}" ${pkg.count ? '' : 'disabled'}>${icon('link')}إرسال الروابط</button>
@@ -1307,6 +1422,7 @@
         </article>
       `).join('');
       refreshIcons();
+      translateUi();
     }
 
     async function api(path, options = {}) {
@@ -1354,7 +1470,7 @@
     async function loadConfig() {
       const data = await fetch('/api/config').then((res) => res.json());
       state.config = data;
-      $('#uploadHelp').textContent = `ارفع صور، فيديو، صوت أو مستندات. الحد الأقصى ${data.maxFileMb} MB لكل ملف.`;
+      updateUploadHelp();
       if (data.pinRequired && !state.pin) $('#pinDialog').showModal();
       openOwnerLibrary();
     }
@@ -1397,25 +1513,32 @@
       return state.packages.find((pkg) => pkg.id === id);
     }
 
+    function updatePackageDialogCopy() {
+      const { mode } = state.packageDialog || {};
+      const count = state.selectedAssetIds.size;
+      $('#packageDialogTitle').textContent = mode === 'rename' ? tr('تعديل المجموعة', 'Edit collection') : mode === 'new' ? tr('مجموعة جديدة', 'New collection') : tr('حفظ كمجموعة', 'Save as collection');
+      $('#packageDialogHint').textContent = mode === 'save'
+        ? tr(`${count} ملف متحدد. احفظهم في مجموعة جديدة أو ضيفهم لمجموعة موجودة.`, `${count} files selected. Save them in a new collection or add them to an existing one.`)
+        : mode === 'new' && count
+          ? tr(`هيتضاف ${count} ملف متحدد للمجموعة.`, `${count} selected files will be added to the collection.`)
+          : mode === 'new' ? tr('تقدر تضيف ملفات بعدين: اختارها واضغط حفظ كمجموعة.', 'You can add files later: select them and choose Save as collection.') : '';
+      const firstOption = $('#packageTarget').querySelector('option[value=""]');
+      if (firstOption) firstOption.textContent = tr('+ مجموعة جديدة', '+ New collection');
+    }
+
     async function openPackageDialog({ mode, packageId = '' }) {
       state.packageDialog = { mode, packageId };
       const pkg = packageId ? findPackage(packageId) : null;
-      const count = state.selectedAssetIds.size;
-      $('#packageDialogTitle').textContent = mode === 'rename' ? 'تعديل المجموعة' : mode === 'new' ? 'مجموعة جديدة' : 'حفظ كمجموعة';
-      $('#packageDialogHint').textContent = mode === 'save'
-        ? `${count} ملف متحدد. احفظهم في package جديدة أو ضيفهم على package موجودة.`
-        : mode === 'new' && count
-          ? `هيتضاف ${count} ملف متحدد للـ package.`
-          : mode === 'new' ? 'تقدر تضيف ملفات بعدين: اختارها واضغط Save as package.' : '';
+      updatePackageDialogCopy();
       $('#packageTargetField').hidden = mode !== 'save';
       if (mode === 'save') {
         try {
           const all = await api('/api/packages?summary=1');
-          $('#packageTarget').innerHTML = '<option value="">+ Package جديدة</option>'
+          $('#packageTarget').innerHTML = `<option value="">${tr('+ مجموعة جديدة', '+ New collection')}</option>`
             + all.packages.map((item) => `<option value="${item.id}">${escapeHtml(item.name)} (${item.count})</option>`).join('');
         } catch (error) {
           log(`PACKAGES ERROR: ${error.message}`);
-          $('#packageTarget').innerHTML = '<option value="">+ Package جديدة</option>';
+          $('#packageTarget').innerHTML = `<option value="">${tr('+ مجموعة جديدة', '+ New collection')}</option>`;
         }
         $('#packageTarget').value = '';
       }
@@ -1443,22 +1566,22 @@
       try {
         let data;
         if (mode === 'rename') {
-          if (!name) throw new Error('اكتب اسم الـ package');
+          if (!name) throw new Error(tr('اكتب اسم المجموعة', 'Enter a collection name'));
           data = await api(`/api/packages/${packageId}`, {
             method: 'PATCH', headers: jsonHeaders, body: JSON.stringify({ name, description })
           });
-          toast('تم تعديل الـ package');
+          toast(tr('تم تعديل المجموعة', 'Collection updated'));
         } else if (target) {
           data = await api(`/api/packages/${target}`, {
             method: 'PATCH', headers: jsonHeaders, body: JSON.stringify({ addAssetIds: assetIds })
           });
-          toast(`تمت إضافة ${assetIds.length} ملف لـ ${data.package.name}`);
+          toast(tr(`تمت إضافة ${assetIds.length} ملف إلى ${data.package.name}`, `Added ${assetIds.length} files to ${data.package.name}`));
         } else {
-          if (!name) throw new Error('اكتب اسم الـ package');
+          if (!name) throw new Error(tr('اكتب اسم المجموعة', 'Enter a collection name'));
           data = await api('/api/packages', {
             method: 'POST', headers: jsonHeaders, body: JSON.stringify({ name, description, assetIds })
           });
-          toast(`تم إنشاء package ${data.package.name} (${data.package.count} ملف)`);
+          toast(tr(`تم إنشاء مجموعة ${data.package.name} (${data.package.count} ملف)`, `Created collection ${data.package.name} (${data.package.count} files)`));
         }
         log(`Package saved: ${data.package.name} (${data.package.count} file(s))`);
         $('#packageDialog').close();
@@ -1472,7 +1595,7 @@
 
     async function deletePackage(id) {
       const pkg = findPackage(id);
-      if (!confirm(`حذف package "${pkg?.name || ''}"؟ الملفات نفسها مش هتتمسح.`)) return;
+      if (!confirm(tr(`حذف مجموعة "${pkg?.name || ''}"؟ الملفات نفسها مش هتتمسح.`, `Delete collection "${pkg?.name || ''}"? Its files will remain in the library.`))) return;
       try {
         await api(`/api/packages/${id}`, { method: 'DELETE' });
         if (state.packageId === id) state.packageId = '';
@@ -1491,7 +1614,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ removeAssetIds: [assetId] })
         });
-        toast('اتشال من الـ package');
+        toast(tr('اتشال من المجموعة', 'Removed from collection'));
         await search();
       } catch (error) {
         log(`PACKAGE ERROR: ${error.message}`);
@@ -1506,8 +1629,8 @@
       delete payload.assetIds;
       payload.packageId = id;
       const endpoint = mode === 'attachment' ? '/api/chatwoot/send-attachment' : '/api/chatwoot/send-link';
-      const label = mode === 'attachment' ? 'file(s)' : 'link(s)';
-      if (!confirm(`Send package "${pkg.name}" (${pkg.count} ${label}) to the current Chatwoot conversation?`)) return;
+      const label = mode === 'attachment' ? tr('ملف', 'files') : tr('رابط', 'links');
+      if (!confirm(tr(`إرسال مجموعة "${pkg.name}" (${pkg.count} ${label}) إلى المحادثة الحالية؟`, `Send collection "${pkg.name}" (${pkg.count} ${label}) to the current Chatwoot conversation?`))) return;
 
       log(`Sending package ${pkg.name} as ${mode} to conversation ${payload.conversationId}...`);
       const data = await api(endpoint, {
@@ -1516,7 +1639,7 @@
         body: JSON.stringify(payload)
       });
       log(`Sent package ${pkg.name}: ${data.count} item(s). Message ID: ${data.messageId || '-'}`);
-      toast('تم إرسال الـ package في الشات');
+      toast(tr('تم إرسال المجموعة في الشات', 'Collection sent to the chat'));
       requestChatwootContext();
     }
 
@@ -1540,11 +1663,11 @@
     async function switchScope(scope) {
       if (scope === 'private') {
         if (!isPrivateLibraryOwner()) {
-          toast('This private library is only available to its owner');
+          toast(tr('اللايبريري الخاصة متاحة لمالكها فقط', 'This private library is only available to its owner'));
           return;
         }
         if (!state.config.privateLibrary?.configured) {
-          toast('Set PRIVATE_LIBRARY_PIN on the server first');
+          toast(tr('لازم تضبط PRIVATE_LIBRARY_PIN على السيرفر أولًا', 'Set PRIVATE_LIBRARY_PIN on the server first'));
           return;
         }
         if (!state.privatePin) {
@@ -1559,16 +1682,21 @@
       await refreshAll();
     }
 
+    function updateUploadSelection() {
+      $('#uploadSelection').textContent = state.selectedFiles.length
+        ? tr(`${state.selectedFiles.length} ملف جاهز${state.folderName ? ` في فولدر ${state.folderName}` : ''}`,
+          `${state.selectedFiles.length} files ready${state.folderName ? ` in folder ${state.folderName}` : ''}`)
+        : tr('لم يتم اختيار ملفات بعد', 'No files selected yet');
+    }
+
     function setFiles(files, folder = false) {
       state.selectedFiles = Array.from(files || []);
       state.folderName = folder && state.selectedFiles.length
         ? (state.selectedFiles[0].webkitRelativePath || '').split('/')[0] : '';
-      $('#uploadSelection').textContent = state.selectedFiles.length
-        ? `${state.selectedFiles.length} ملف جاهز${state.folderName ? ` في فولدر ${state.folderName}` : ''}`
-        : 'لم يتم اختيار ملفات بعد';
+      updateUploadSelection();
       if (state.selectedFiles.length) {
         log(`Selected ${state.selectedFiles.length} file(s)`);
-        toast(`${state.selectedFiles.length} ملف جاهز للرفع`);
+        toast(tr(`${state.selectedFiles.length} ملف جاهز للرفع`, `${state.selectedFiles.length} files ready to upload`));
       }
     }
 
@@ -1579,7 +1707,7 @@
       }
 
       if (state.folderName && state.selectedFiles.length > 200) {
-        toast('الحد الأقصى للفولدر 200 ملف');
+        toast(tr('الحد الأقصى للفولدر 200 ملف', 'A folder can contain up to 200 files'));
         return;
       }
 
@@ -1598,15 +1726,15 @@
           form.append('notes', $('#notesInput').value);
           const data = await uploadWithFallback(form, batch);
           uploaded += data.created.length;
-          $('#uploadSelection').textContent = `تم رفع ${uploaded} من ${state.selectedFiles.length}`;
+          $('#uploadSelection').textContent = tr(`تم رفع ${uploaded} من ${state.selectedFiles.length}`, `Uploaded ${uploaded} of ${state.selectedFiles.length}`);
         }
         log(`Uploaded ${uploaded} file(s)`);
-        toast('تم الرفع بنجاح');
+        toast(tr('تم الرفع بنجاح', 'Upload complete'));
         state.selectedFiles = [];
         state.folderName = '';
         $('#fileInput').value = '';
         $('#folderInput').value = '';
-        $('#uploadSelection').textContent = 'لم يتم اختيار ملفات بعد';
+        updateUploadSelection();
         await refreshAll();
       } catch (error) {
         const message = error?.message || String(error) || 'Unknown upload error';
@@ -1656,7 +1784,7 @@
     }
 
     async function deleteAsset(id) {
-      if (!confirm('تأكيد حذف الملف؟')) return;
+      if (!confirm(tr('تأكيد حذف الملف؟', 'Delete this file?'))) return;
       try {
         await api(`/api/assets/${id}`, { method: 'DELETE' });
         log(`Deleted asset ${id}`);
@@ -1668,21 +1796,21 @@
 
     async function copyUrl(url) {
       await navigator.clipboard.writeText(url);
-      toast('تم نسخ الرابط');
+      toast(tr('تم نسخ الرابط', 'Link copied'));
     }
 
     async function copySelectedUrls() {
       const items = selectedAssets();
       if (!items.length) return;
       await navigator.clipboard.writeText(items.map((item) => item.url).join('\n'));
-      toast(`Copied ${items.length} link(s)`);
+      toast(tr(`تم نسخ ${items.length} رابط`, `Copied ${items.length} links`));
     }
 
     function getSendPayload(assetIds) {
       const { conversation } = getConversationContext();
       const accountId = resolveAccountId() || state.config.chatwootAccountId;
       if (!conversation?.id || !accountId) {
-        throw new Error('افتح التطبيق من داخل محادثة Chatwoot الأول');
+        throw new Error(tr('افتح التطبيق من داخل محادثة Chatwoot الأول', 'Open the app from a Chatwoot conversation first'));
       }
       return {
         assetIds,
@@ -1697,8 +1825,8 @@
       if (!ids.length) return;
       const payload = getSendPayload(ids);
       const endpoint = mode === 'attachment' ? '/api/chatwoot/send-attachment' : '/api/chatwoot/send-link';
-      const label = mode === 'attachment' ? 'file(s)' : 'link(s)';
-      if (!confirm('Send ' + ids.length + ' ' + label + ' to the current Chatwoot conversation?')) return;
+      const label = mode === 'attachment' ? tr('ملف', 'files') : tr('رابط', 'links');
+      if (!confirm(tr(`إرسال ${ids.length} ${label} إلى المحادثة الحالية؟`, `Send ${ids.length} ${label} to the current Chatwoot conversation?`))) return;
 
       log('Sending ' + ids.length + ' ' + mode + ' item(s) to Chatwoot conversation ' + payload.conversationId + '...');
       const data = await api(endpoint, {
@@ -1707,7 +1835,7 @@
         body: JSON.stringify(payload)
       });
       log('Sent ' + (data.count || ids.length) + ' ' + mode + ' item(s). Message ID: ' + (data.messageId || '-'));
-      toast('تم الإرسال في الشات');
+      toast(tr('تم الإرسال في الشات', 'Sent to the chat'));
       requestChatwootContext();
     }
 
@@ -1768,7 +1896,7 @@
         if (pkgCopy) {
           const { package: pkg } = await api(`/api/packages/${pkgCopy}`);
           await navigator.clipboard.writeText(pkg.assets.map((item) => item.url).join('\n'));
-          toast(`تم نسخ ${pkg.assets.length} رابط`);
+          toast(tr(`تم نسخ ${pkg.assets.length} رابط`, `Copied ${pkg.assets.length} links`));
         }
         if (pkgView) {
           state.packageId = state.packageId === pkgView ? '' : pkgView;
@@ -1786,6 +1914,9 @@
 
     $('#themeBtn').addEventListener('click', () => {
       setTheme(currentTheme() === 'dark' ? 'light' : 'dark');
+    });
+    $('#languageBtn').addEventListener('click', () => {
+      setLanguage(state.language === 'ar' ? 'en' : 'ar');
     });
 
     $('#savePinBtn').addEventListener('click', async () => {
@@ -1880,6 +2011,8 @@
       refreshIcons();
       updateThemeButton();
       renderContext();
+      translateUi();
+      updateUploadSelection();
       await loadConfig();
       updateScopeUi();
       await refreshAll();

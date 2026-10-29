@@ -63,7 +63,7 @@ PRIVATE_LIBRARY_PIN=use-a-strong-private-pin
 
 `PUBLIC_BASE_URL` is important when the app is behind a proxy, because generated links must be HTTPS direct links.
 
-## Ahmed's Private Library
+## Jackie Private Library
 
 The app exposes a separate private library when Chatwoot reports the current agent as:
 
@@ -71,8 +71,9 @@ The app exposes a separate private library when Chatwoot reports the current age
 ahmed.farouk@engosoft.com
 ```
 
-Set `PRIVATE_LIBRARY_PIN` to enable it. The email controls who sees the private-library tab, while the separate PIN protects every private API request on the server.
-When Chatwoot sends Ahmed's `currentAgent` context, the app opens his private library automatically if the PIN is already in the browser session. Otherwise it prompts him for the private PIN. `PRIVATE_LIBRARY_PIN` must be configured on the server for this to work.
+The private library is displayed as **Jackie Private** in the app. The existing `PRIVATE_LIBRARY_EMAIL` setting still controls who can access it; changing the display name does not transfer ownership or change existing files. Set `PRIVATE_LIBRARY_PIN` to enable it. When Chatwoot sends the configured owner's `currentAgent` context, the app opens the private library automatically if the PIN is already in the browser session. Otherwise it prompts for the private PIN.
+
+The interface supports Arabic and English. Use the language button in the top bar to switch; the choice is saved in the browser and updates the page direction.
 
 Private files:
 
@@ -97,7 +98,7 @@ Typical flow:
 
 Notes:
 
-- Packages exist in both the shared library and Ahmed's private library, and follow the same access rules.
+- Packages exist in both the shared library and Jackie private library, and follow the same access rules.
 - Shared packages can only contain shared files, so a private file never reaches other agents.
 - Private packages can mix private and shared files.
 - Deleting a package does not delete its files. Deleting a file removes it from every package.
@@ -117,7 +118,7 @@ POST   /api/chatwoot/send-attachment  { packageId, accountId, conversationId }
 POST   /api/chatwoot/send-link        { packageId, accountId, conversationId }
 ```
 
-Send `x-library-scope: private` plus the private-library headers to work with Ahmed's private packages.
+Send `x-library-scope: private` plus the private-library headers to work with Jackie private packages.
 
 ## Persistent Storage
 
