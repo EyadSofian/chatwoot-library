@@ -413,6 +413,36 @@
       box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.12);
     }
 
+    .asset.drag-over,
+    .package-card.drag-over {
+      outline: 2px dashed var(--brand);
+      outline-offset: -5px;
+    }
+
+    .card-order {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 4px;
+    }
+
+    .card-order button {
+      width: 28px;
+      height: 28px;
+      display: inline-grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface-muted);
+      color: var(--muted);
+      padding: 0;
+    }
+
+    .card-order button:disabled { opacity: 0.35; cursor: default; }
+    .card-order .drag-handle { cursor: grab; touch-action: none; }
+    .card-order .drag-handle:active { cursor: grabbing; }
+    .card-order .lucide { width: 14px; height: 14px; }
+
     .preview {
       background: var(--surface-2);
       display: grid;
@@ -1402,8 +1432,8 @@
 
     function render() {
       pruneSelection();
-      grid.innerHTML = state.assets.map((item) => `
-        <article class="asset ${state.selectedAssetIds.has(item.id) ? 'selected' : ''}">
+      grid.innerHTML = state.assets.map((item, index) => `
+        <article class="asset ${state.selectedAssetIds.has(item.id) ? 'selected' : ''}" data-card-id="${item.id}">
           <div class="preview">
             <span class="badge">${typeLabel(item.type)}</span>
             <label class="asset-select">
@@ -1413,6 +1443,7 @@
             ${renderPreview(item)}
           </div>
           <div class="asset-body">
+            ${orderControls(item.id, index, state.assets.length, 'asset')}
             <div class="asset-title" dir="auto" title="${escapeHtml(item.originalName)}">${escapeHtml(item.title || item.originalName)}</div>
             ${item.folderPath ? `<div class="folder-path">${icon('folder')} ${escapeHtml(item.folderPath)}</div>` : ''}
             <div class="meta">
@@ -1458,8 +1489,9 @@
       } else {
         $('#packagesEmpty').textContent = tr('مفيش مجموعات لسه. اختار ملفات واضغط حفظ كمجموعة، أو ارفع فولدر كامل.', 'No collections yet. Select files and save them as a collection, or upload a folder.');
       }
-      $('#packageGrid').innerHTML = packages.map((pkg) => `
-        <article class="package-card ${pkg.id === state.packageId ? 'active' : ''}">
+      $('#packageGrid').innerHTML = packages.map((pkg, index) => `
+        <article class="package-card ${pkg.id === state.packageId ? 'active' : ''}" data-card-id="${pkg.id}">
+          ${orderControls(pkg.id, index, packages.length, 'package')}
           <div class="package-name" title="${escapeHtml(pkg.name)}">${icon('package')}<span>${escapeHtml(pkg.name)}</span></div>
           <div class="meta">
             <span>${tr(`${pkg.count} ملف`, `${pkg.count} files`)}</span>
@@ -1479,6 +1511,78 @@
       `).join('');
       refreshIcons();
       translateUi();
+    }
+
+    function orderControls(id, index, count, kind) {
+      const label = kind === 'asset' ? tr('ملف', 'file') : tr('مجموعة', 'collection');
+      return `<div class="card-order">
+        <button type="button" data-move="up" title="${tr('تحريك لأعلى', 'Move up')}" aria-label="${tr(`تحريك ${label} لأعلى`, `Move ${label} up`)}" ${index === 0 ? 'disabled' : ''}>${icon('arrow-up')}</button>
+        <button type="button" data-move="down" title="${tr('تحريك لأسفل', 'Move down')}" aria-label="${tr(`تحريك ${label} لأسفل`, `Move ${label} down`)}" ${index === count - 1 ? 'disabled' : ''}>${icon('arrow-down')}</button>
+        <button type="button" class="drag-handle" title="${tr('اسحب لتغيير الترتيب', 'Drag to reorder')}" aria-label="${tr(`اسحب ${label} لتغيير الترتيب`, `Drag ${label} to reorder`)}">${icon('grip-vertical')}</button>
+      </div>`;
+    }
+
+    async function moveCard(kind, movedId, anchorId, placement) {
+      if (!anchorId || movedId === anchorId) return;
+      try {
+        await api(`/api/${kind === 'asset' ? 'assets' : 'packages'}/order`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ movedId, anchorId, placement })
+        });
+        if (kind === 'asset') await loadAssets();
+        else await loadPackages();
+      } catch (error) {
+        log(`ORDER ERROR: ${error.message}`);
+        toast(error.message);
+      }
+    }
+
+    function setupCardOrdering(container, kind) {
+      container.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-move]');
+        if (!button || button.disabled) return;
+        const cards = [...container.querySelectorAll('[data-card-id]')];
+        const card = button.closest('[data-card-id]');
+        const index = cards.indexOf(card);
+        const up = button.dataset.move === 'up';
+        const anchor = cards[index + (up ? -1 : 1)];
+        moveCard(kind, card.dataset.cardId, anchor?.dataset.cardId, up ? 'before' : 'after');
+      });
+      let dragging = null;
+      const targetAt = (event) => {
+        const card = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-card-id]');
+        return card && container.contains(card) && card.dataset.cardId !== dragging?.id ? card : null;
+      };
+      const clearDrag = () => {
+        container.querySelectorAll('.drag-over').forEach((card) => card.classList.remove('drag-over'));
+        dragging = null;
+      };
+      container.addEventListener('pointerdown', (event) => {
+        const handle = event.target.closest('.drag-handle');
+        if (!handle || event.button !== 0) return;
+        dragging = { id: handle.closest('[data-card-id]').dataset.cardId, x: event.clientX, y: event.clientY };
+        handle.setPointerCapture(event.pointerId);
+      });
+      container.addEventListener('pointermove', (event) => {
+        if (!dragging) return;
+        if (Math.hypot(event.clientX - dragging.x, event.clientY - dragging.y) < 6) return;
+        const target = targetAt(event);
+        container.querySelectorAll('.drag-over').forEach((card) => card.classList.remove('drag-over'));
+        target?.classList.add('drag-over');
+      });
+      container.addEventListener('pointerup', (event) => {
+        if (!dragging) return;
+        const target = targetAt(event);
+        const movedId = dragging.id;
+        const moved = Math.hypot(event.clientX - dragging.x, event.clientY - dragging.y) >= 6;
+        clearDrag();
+        if (!moved || !target) return;
+        const rect = target.getBoundingClientRect();
+        const after = event.clientY > rect.top + rect.height / 2;
+        moveCard(kind, movedId, target.dataset.cardId, after ? 'after' : 'before');
+      });
+      container.addEventListener('pointercancel', clearDrag);
     }
 
     async function api(path, options = {}) {
@@ -1941,6 +2045,9 @@
       renderPackages();
       await loadAssets().catch((error) => log(`ERROR: ${error.message}`));
     });
+
+    setupCardOrdering(grid, 'asset');
+    setupCardOrdering($('#packageGrid'), 'package');
 
     $('#packageGrid').addEventListener('click', async (event) => {
       const button = event.target.closest('button');

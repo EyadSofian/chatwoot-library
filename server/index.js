@@ -337,6 +337,35 @@ function packageInScope(pkg, scope) {
     : !isPrivatePackage(pkg);
 }
 
+function compareCardOrder(a, b, kind) {
+  const timestamp = (item) => new Date(kind === 'package' ? item.updatedAt || item.createdAt : item.createdAt).getTime() || 0;
+  const aOrder = Number.isSafeInteger(a.sortOrder) && a.sortOrder >= 0 ? a.sortOrder : null;
+  const bOrder = Number.isSafeInteger(b.sortOrder) && b.sortOrder >= 0 ? b.sortOrder : null;
+  if (aOrder !== null && bOrder !== null && aOrder !== bOrder) return aOrder - bOrder;
+  if (aOrder !== null && bOrder === null) return 1;
+  if (aOrder === null && bOrder !== null) return -1;
+  return timestamp(b) - timestamp(a);
+}
+
+function orderedCards(items, kind) {
+  return [...items].sort((a, b) => compareCardOrder(a, b, kind));
+}
+
+function reorderCards(items, scopeItems, movedId, anchorId, placement, kind) {
+  if (!['before', 'after'].includes(placement) || movedId === anchorId) {
+    throw httpError(400, 'Invalid card order');
+  }
+  const ordered = orderedCards(scopeItems, kind);
+  const from = ordered.findIndex((item) => item.id === movedId);
+  if (from < 0) throw httpError(404, 'Card not found');
+  const [moved] = ordered.splice(from, 1);
+  const anchor = ordered.findIndex((item) => item.id === anchorId);
+  if (anchor < 0) throw httpError(404, 'Card not found');
+  ordered.splice(anchor + (placement === 'after' ? 1 : 0), 0, moved);
+  const positions = new Map(ordered.map((item, index) => [item.id, index]));
+  return items.map((item) => positions.has(item.id) ? { ...item, sortOrder: positions.get(item.id) } : item);
+}
+
 function canAccessPackage(req, pkg) {
   if (!isPrivatePackage(pkg)) return true;
   return hasPrivateAccess(req)
@@ -659,7 +688,7 @@ app.get('/api/assets', requirePin, requireScopeAccess, async (req, res) => {
       item.tags || [],
       (packagesByAsset.get(item.id) || []).map((pkg) => pkg.name)
     ]))
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    .sort((a, b) => compareCardOrder(a, b, 'asset'));
 
   res.json({
     total: filtered.length,
@@ -668,6 +697,17 @@ app.get('/api/assets', requirePin, requireScopeAccess, async (req, res) => {
       packages: packagesByAsset.get(item.id) || []
     }))
   });
+});
+
+app.patch('/api/assets/order', requirePin, requireScopeAccess, serializeMutation, async (req, res) => {
+  const scope = requestScope(req);
+  const items = await readLibrary();
+  const visible = items.filter((item) => scope === 'private'
+    ? isPrivateAsset(item) && normalizeEmail(item.ownerEmail) === PRIVATE_LIBRARY_EMAIL
+    : !isPrivateAsset(item));
+  const next = reorderCards(items, visible, req.body.movedId, req.body.anchorId, req.body.placement, 'asset');
+  await writeLibrary(next);
+  res.json({ ok: true });
 });
 
 app.get('/api/storage', requirePin, requireScopeAccess, async (req, res) => {
@@ -865,9 +905,18 @@ app.get('/api/packages', requirePin, requireScopeAccess, async (req, res) => {
           ? [item.originalName, item.title, item.folderPath, item.tags || []] : [];
       })
     ]))
-    .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+    .sort((a, b) => compareCardOrder(a, b, 'package'));
 
   res.json({ packages: filtered.map((pkg) => packageResponse(pkg, assetsById, req, req.query.summary === '1')) });
+});
+
+app.patch('/api/packages/order', requirePin, requireScopeAccess, serializeMutation, async (req, res) => {
+  const scope = requestScope(req);
+  const packages = await readPackages();
+  const visible = packages.filter((pkg) => packageInScope(pkg, scope));
+  const next = reorderCards(packages, visible, req.body.movedId, req.body.anchorId, req.body.placement, 'package');
+  await writePackages(next);
+  res.json({ ok: true });
 });
 
 app.get('/api/packages/:id', requirePin, async (req, res) => {

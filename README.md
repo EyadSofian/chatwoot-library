@@ -11,6 +11,7 @@ Standalone media library for Chatwoot teams. It lets agents upload images, video
 - Smart search by file name, title, tags, notes, and package name: case-insensitive, multi-word (`cfm part1`), ignores separators (`CFM-1`, `C.F.M`), and normalizes Arabic letter variants (`إدارة` = `اداره`).
 - Search also matches paths inside uploaded folders and files contained in packages. Open a folder with **View files**, then search to narrow its contents.
 - Asset results load 60 at a time; use **Load more** for the next page.
+- Reorder file and package cards with the grip handle or the up/down buttons. Order is saved on the server, including separate shared and private libraries. New files and packages appear first until moved.
 - Packages: group related files (for example every `CFM` course file) and send the whole package to the customer at once, as attachments or as links.
 - Filter by type: images, video, audio, files.
 - Copy direct public URL.
@@ -112,8 +113,10 @@ GET    /api/packages?q=cfm
 GET    /api/packages/:id
 POST   /api/packages            { name, description?, tags?, assetIds }
 PATCH  /api/packages/:id        { name?, description?, tags?, assetIds?, addAssetIds?, removeAssetIds? }
+PATCH  /api/packages/order      { movedId, anchorId, placement: "before" | "after" }
 DELETE /api/packages/:id
 GET    /api/assets?packageId=:id
+PATCH  /api/assets/order        { movedId, anchorId, placement: "before" | "after" }
 POST   /api/chatwoot/send-attachment  { packageId, accountId, conversationId }
 POST   /api/chatwoot/send-link        { packageId, accountId, conversationId }
 ```
